@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Scriptorium",
+  "description": "Sophia: A digital sanctuary for communal reading and contemplative study of patristic, monastic, and philosophical treatises.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,735 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "EB Garamond", "Noto Serif Ethiopic", Georgia, serif;
+  --font-display: "Cinzel", "Noto Serif Ethiopic", "EB Garamond", serif;
+  --font-sans: "Inter", "Noto Sans Ethiopic", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-scripture: "EB Garamond", "Noto Serif Ethiopic", Georgia, serif;
+  --font-mono: "Inter", "Noto Sans Ethiopic", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --color-navy: #0f2b5c;
+  --color-surface: #ffffff;
+  --color-surface-dim: #f0f7ff;
+  --color-surface-bright: #ffffff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f4f9ff;
+  --color-surface-container: #eaf3fc;
+  --color-surface-container-high: #deedfc;
+  --color-surface-container-highest: #cde4fa;
+  --color-on-surface: #0c1e38;
+  --color-on-surface-variant: #1e3a5f;
+  --color-primary: #0284c7;
+  --color-primary-container: #e0f2fe;
+  --color-on-primary: #ffffff;
+  --color-secondary: #d4af37;
+  --color-secondary-container: #fefce8;
+  --color-on-secondary-container: #78350f;
+  --color-tertiary-container: #eaf3fc;
+  --color-on-tertiary-container: #0c1e38;
+  --color-outline: #cbdff7;
+  --color-outline-variant: #deedfc;
+  --color-gold: #d4af37;
+
+  --color-theme-main: var(--text-main);
+  --color-theme-surface: var(--bg-surface);
+  --color-theme-subtle: var(--bg-subtle);
+  --color-theme-muted: var(--bg-muted);
+  --color-theme-app: var(--bg-app);
+  --color-theme-accent: var(--accent);
+  --color-theme-text-muted: var(--text-muted);
+  --color-theme-text-subtle: var(--text-subtle);
+}
+
+@layer base {
+  :root, [data-theme="light"] {
+    --bg-app: #f4f8fd;
+    --bg-surface: #ffffff;
+    --bg-subtle: #eef6ff;
+    --bg-muted: #deedfc;
+    --border-color: #cbdff7;
+    --border-subtle: #e2effd;
+    --text-main: #0c1e38;
+    --text-body: #1e3a5f;
+    --text-muted: #476585;
+    --text-subtle: #7b93af;
+    --accent: #0284c7;
+    --accent-light: #e0f2fe;
+    --accent-hover: #0369a1;
+    --gold: #d4af37;
+    --brass: #b8860b;
+    --mahogany: #996515;
+    --scholar-green: #0284c7;
+    --crimson: #d4af37;
+    --crimson-light: #fefce8;
+    --crimson-border: #fef08a;
+    color-scheme: light;
+  }
+
+  [data-theme="dark"] {
+    --bg-app: #0f1013;
+    --bg-surface: #181a1f;
+    --bg-subtle: #20232a;
+    --bg-muted: #282c35;
+    --border-color: #353b49;
+    --border-subtle: #272b35;
+    --text-main: #f7f6f2;
+    --text-body: #dedcd6;
+    --text-muted: #a3a9b8;
+    --text-subtle: #89909f;
+    --accent: #dfba4f;
+    --accent-light: #2c2310;
+    --accent-hover: #ebc65c;
+    --gold: #ebc65c;
+    --brass: #e2b95b;
+    --mahogany: #f0c5bb;
+    --scholar-green: #dfba4f;
+    --crimson: #e06d75;
+    --crimson-light: #3d1b1e;
+    --crimson-border: #6d2d32;
+    color-scheme: dark;
+  }
+
+  /* Deep Lapis & Golden Theme */
+  [data-theme="navy"] {
+    --bg-app: #f1f5fa;
+    --bg-surface: #ffffff;
+    --bg-subtle: #e8f0fe;
+    --bg-muted: #d4e4fc;
+    --border-color: #c0d6f6;
+    --border-subtle: #dbe7fa;
+    --text-main: #0a1f3d;
+    --text-body: #16325c;
+    --text-muted: #3b5a82;
+    --text-subtle: #6b8cb3;
+    --accent: #0f2b5c;
+    --accent-light: #e8f0fe;
+    --accent-hover: #1e40af;
+    --gold: #d4af37;
+    --brass: #b8860b;
+    --mahogany: #0a1f3d;
+    --scholar-green: #1d4ed8;
+    --crimson: #d4af37;
+    --crimson-light: #fefce8;
+    --crimson-border: #fef08a;
+    color-scheme: light;
+  }
+
+  /* Imperial Burgundy & Crimson Theme */
+  [data-theme="burgundy"] {
+    --bg-app: #faf4f4;
+    --bg-surface: #ffffff;
+    --bg-subtle: #fcedec;
+    --bg-muted: #f8d7d5;
+    --border-color: #ebbfbc;
+    --border-subtle: #f5dedd;
+    --text-main: #3b070c;
+    --text-body: #591319;
+    --text-muted: #822f36;
+    --text-subtle: #aa5b62;
+    --accent: #881337;
+    --accent-light: #ffe4e6;
+    --accent-hover: #9f1239;
+    --gold: #d4af37;
+    --brass: #b8860b;
+    --mahogany: #4a0404;
+    --scholar-green: #166534;
+    --crimson: #881337;
+    --crimson-light: #ffe4e6;
+    --crimson-border: #fecdd3;
+    color-scheme: light;
+  }
+
+  /* Monastic Slate & Gray Theme */
+  [data-theme="gray"] {
+    --bg-app: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f1f5f9;
+    --bg-muted: #e2e8f0;
+    --border-color: #cbd5e1;
+    --border-subtle: #e2e8f0;
+    --text-main: #0f172a;
+    --text-body: #334155;
+    --text-muted: #64748b;
+    --text-subtle: #94a3b8;
+    --accent: #334155;
+    --accent-light: #f1f5f9;
+    --accent-hover: #1e293b;
+    --gold: #64748b;
+    --brass: #475569;
+    --mahogany: #0f172a;
+    --scholar-green: #475569;
+    --crimson: #475569;
+    --crimson-light: #f1f5f9;
+    --crimson-border: #cbd5e1;
+    color-scheme: light;
+  }
+
+  /* Monastic Cream & Espresso Theme (Light Sanctuary Desk) */
+  [data-theme="cream"] {
+    --bg-app: #fbf7ee;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f5eedf;
+    --bg-muted: #ebe2d0;
+    --border-color: #dfd5c6;
+    --border-subtle: #eae2d5;
+    --text-main: #2b1810;
+    --text-body: #3e2415;
+    --text-muted: #735845;
+    --text-subtle: #967e6c;
+    --accent: #3e2415;
+    --accent-light: #efe8dc;
+    --accent-hover: #26150a;
+    --gold: #b38b4d;
+    --brass: #8f6c38;
+    --mahogany: #3e2415;
+    --scholar-green: #3d5a36;
+    --crimson: #842e1b;
+    --crimson-light: #f7ede8;
+    --crimson-border: #d4a99d;
+    color-scheme: light;
+  }
+
+  /* Warm Brown & Cream Theme */
+  [data-theme="brown"] {
+    --bg-app: #fbf7ee;
+    --bg-surface: #fffdf9;
+    --bg-subtle: #f4ecdd;
+    --bg-muted: #e9dec9;
+    --border-color: #dfceb2;
+    --border-subtle: #eee3ce;
+    --text-main: #2b1810;
+    --text-body: #42281a;
+    --text-muted: #6e472e;
+    --text-subtle: #966b4e;
+    --accent: #783e19;
+    --accent-light: #f4ebd9;
+    --accent-hover: #5e2f11;
+    --gold: #c99a6b;
+    --brass: #a46c3b;
+    --mahogany: #381f13;
+    --scholar-green: #3d5a36;
+    --crimson: #842e1b;
+    --crimson-light: #f7ede8;
+    --crimson-border: #d4a99d;
+    color-scheme: light;
+  }
+
+  /* Authentic Antique Parchment (ብራና) Theme */
+  [data-theme="vintage"] {
+    /* Rich warm honeyed cream & aged parchment hues */
+    --bg-app: #f2e9d7;
+    --bg-surface: #faf4e8;
+    --bg-subtle: #eae0cb;
+    --bg-muted: #ded2b9;
+    --border-color: #cbb692;
+    --border-subtle: #decfae;
+    --parchment: #faf4e8;
+
+    /* Authentic Iron-Gall & Sepia Ink (ጥቁር ቀለም) - Deep, high-contrast warm sepia */
+    --text-main: #27120a;
+    --text-body: #3c2013;
+    --text-muted: #5f3a23;
+    --text-subtle: #7d5236;
+    --mahogany: #27120a;
+    --mahogany-accent: #481f12;
+
+    /* Vermilion / Crimson Rubrication (ቀይ ቀለም) - Traditional manuscript section headings */
+    --accent: #8e1c16;
+    --accent-light: #f7e6e3;
+    --accent-hover: #721410;
+    --crimson: #8e1c16;
+    --crimson-light: #f7e6e3;
+    --crimson-border: #bf8985;
+
+    /* Illuminated Manuscript Gold Leaf & Brass (ወርቅ ማሸብረቂያ) */
+    --gold: #ad7820;
+    --brass: #ad7820;
+    --brass-light: #f5e8cd;
+    --brass-border: #8f6014;
+
+    /* Monastic Scholar's Deep Green */
+    --scholar-green: #1c4530;
+
+    color-scheme: light;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg-app);
+    color: var(--text-body);
+    font-family: var(--font-sans);
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  .font-scripture-quote {
+    font-family: var(--font-serif);
+    font-style: italic;
+  }
+}
+
+/* ==========================================================================
+   AUTHENTIC ANTIQUE PARCHMENT (ብራና) TEXTURE & ORGANIC GRAIN
+   ========================================================================== */
+[data-theme="vintage"] body {
+  background-color: #f3ebdb;
+  /* Authentic Brana parchment texture: warm ambient vignette + organic vellum micro-fibers */
+  background-image: 
+    radial-gradient(ellipse at 50% 8%, rgba(255, 252, 246, 0.72) 0%, rgba(243, 235, 219, 0.45) 55%, rgba(204, 182, 142, 0.52) 100%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='branaSkin'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.64' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0.36 0 0 0 0.16  0 0.29 0 0 0.11  0 0 0.21 0 0.07  0 0 0 0.065 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23branaSkin)'/%3E%3C/svg%3E");
+  background-attachment: fixed;
+  font-family: var(--font-serif);
+  color: #3c2013;
+}
+
+/* Classical Serif Typography for the Vintage Theme */
+[data-theme="vintage"] {
+  --font-sans: "EB Garamond", Georgia, serif;
+  font-family: var(--font-serif);
+}
+
+[data-theme="vintage"] h1,
+[data-theme="vintage"] h2,
+[data-theme="vintage"] h3,
+[data-theme="vintage"] h4,
+[data-theme="vintage"] h5,
+[data-theme="vintage"] h6,
+[data-theme="vintage"] .font-serif,
+[data-theme="vintage"] .font-headline-sm,
+[data-theme="vintage"] .font-headline-md,
+[data-theme="vintage"] .font-headline-lg,
+[data-theme="vintage"] .font-headline-lg-mobile,
+[data-theme="vintage"] .font-display-lg {
+  font-family: var(--font-serif);
+  letter-spacing: -0.01em;
+}
+
+[data-theme="vintage"] button,
+[data-theme="vintage"] input,
+[data-theme="vintage"] textarea,
+[data-theme="vintage"] select {
+  font-family: var(--font-serif);
+}
+
+/* ==========================================================================
+   AUTHENTIC ANTIQUE PARCHMENT (ብራና) - HIGH VISIBILITY TEXT & BUTTONS AT ALL TIMES
+   ========================================================================== */
+/* In Vintage Theme, all white text is converted to warm antique vellum ivory cream (#faf4e8) - ALWAYS visible */
+[data-theme="vintage"] .text-white,
+[data-theme="vintage"] [class*="text-white"],
+[data-theme="vintage"] [class*="text-slate-50"],
+[data-theme="vintage"] [class*="text-gray-50"],
+[data-theme="vintage"] [class*="text-zinc-50"] {
+  color: #faf4e8 !important;
+}
+
+/* Primary dark action buttons on Vintage Theme: Deep sepia & vermilion with vellum script ALWAYS visible */
+[data-theme="vintage"] .bg-theme-main,
+[data-theme="vintage"] button.bg-theme-main,
+[data-theme="vintage"] a.bg-theme-main,
+[data-theme="vintage"] .bg-theme-surface .bg-theme-main,
+[data-theme="vintage"] .bg-theme-surface button.bg-theme-main,
+[data-theme="vintage"] .bg-theme-subtle .bg-theme-main,
+[data-theme="vintage"] .bg-theme-subtle button.bg-theme-main {
+  background-color: #27120a !important;
+  color: #faf4e8 !important;
+  border: 1px solid #5f3a23;
+  box-shadow: 0 1px 3px rgba(39, 18, 10, 0.25), inset 0 1px 0 rgba(255, 235, 200, 0.12);
+}
+
+[data-theme="vintage"] .bg-theme-accent,
+[data-theme="vintage"] button.bg-theme-accent,
+[data-theme="vintage"] a.bg-theme-accent,
+[data-theme="vintage"] .bg-theme-surface .bg-theme-accent,
+[data-theme="vintage"] .bg-theme-surface button.bg-theme-accent,
+[data-theme="vintage"] .bg-theme-subtle .bg-theme-accent,
+[data-theme="vintage"] .bg-theme-subtle button.bg-theme-accent {
+  background-color: #8e1c16 !important;
+  color: #faf4e8 !important;
+  border: 1px solid #bf8985;
+  box-shadow: 0 1px 3px rgba(142, 28, 22, 0.25), inset 0 1px 0 rgba(255, 235, 200, 0.15);
+}
+
+/* Ensure all nested text, spans, icons inside dark buttons are ALWAYS visible at all times */
+[data-theme="vintage"] .bg-theme-main *,
+[data-theme="vintage"] .bg-theme-accent *,
+[data-theme="vintage"] .bg-theme-surface .bg-theme-main *,
+[data-theme="vintage"] .bg-theme-surface .bg-theme-accent *,
+[data-theme="vintage"] .bg-theme-subtle .bg-theme-main *,
+[data-theme="vintage"] .bg-theme-subtle .bg-theme-accent * {
+  color: #faf4e8 !important;
+}
+
+/* Hover state keeps it clearly visible with slight warm glow */
+[data-theme="vintage"] .bg-theme-main:hover,
+[data-theme="vintage"] .bg-theme-surface .bg-theme-main:hover,
+[data-theme="vintage"] .bg-theme-subtle .bg-theme-main:hover {
+  background-color: #3c2013 !important;
+  color: #ffffff !important;
+}
+[data-theme="vintage"] .bg-theme-main:hover *,
+[data-theme="vintage"] .bg-theme-surface .bg-theme-main:hover *,
+[data-theme="vintage"] .bg-theme-subtle .bg-theme-main:hover * {
+  color: #ffffff !important;
+}
+
+[data-theme="vintage"] .bg-theme-accent:hover,
+[data-theme="vintage"] .bg-theme-surface .bg-theme-accent:hover,
+[data-theme="vintage"] .bg-theme-subtle .bg-theme-accent:hover {
+  background-color: #721410 !important;
+  color: #ffffff !important;
+}
+[data-theme="vintage"] .bg-theme-accent:hover *,
+[data-theme="vintage"] .bg-theme-surface .bg-theme-accent:hover *,
+[data-theme="vintage"] .bg-theme-subtle .bg-theme-accent:hover * {
+  color: #ffffff !important;
+}
+
+/* Authentic Aged Parchment Folios & Cards with Traditional Blind Drypoint Ruling */
+[data-theme="vintage"] .bg-theme-surface {
+  background-color: #faf5ea;
+  background-image: 
+    /* Traditional manuscript blind drypoint horizontal guidelines (የቀለም መስመር) */
+    repeating-linear-gradient(180deg, transparent 0, transparent 31px, rgba(195, 172, 131, 0.11) 32px),
+    linear-gradient(180deg, rgba(255, 254, 250, 0.65) 0%, rgba(247, 240, 226, 0.65) 100%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='branaPage'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.74' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0.32 0 0 0 0.18  0 0.26 0 0 0.13  0 0 0.20 0 0.08  0 0 0 0.045 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23branaPage)'/%3E%3C/svg%3E");
+  border-color: #c9b48e;
+  border-width: 1px;
+  /* Authentic tactile paper depth with subtle folio rim shading and deckle edge patina */
+  box-shadow: 
+    0 1px 2px rgba(45, 25, 8, 0.07),
+    0 4px 14px -2px rgba(45, 25, 8, 0.06),
+    inset 0 0 24px rgba(198, 169, 122, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="vintage"] .bg-theme-subtle {
+  background-color: #ece0ca;
+  background-image: 
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='subtlePaper'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0.3 0 0 0 0.15  0 0.25 0 0 0.1  0 0 0.2 0 0.06  0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23subtlePaper)'/%3E%3C/svg%3E");
+  border-color: #decfae;
+}
+
+[data-theme="vintage"] .bg-theme-muted {
+  background-color: #ded2b9;
+}
+
+[data-theme="vintage"] .border-theme {
+  border-color: #c9b48e;
+}
+
+[data-theme="vintage"] .border-theme-subtle {
+  border-color: #decfae;
+}
+
+/* Parchment Form Inputs: No stark modern white textboxes */
+[data-theme="vintage"] input,
+[data-theme="vintage"] textarea,
+[data-theme="vintage"] select {
+  background-color: #f7efe1;
+  border-color: #c9b48e;
+  color: #27120a;
+}
+
+[data-theme="vintage"] input::placeholder,
+[data-theme="vintage"] textarea::placeholder {
+  color: #8c6448;
+}
+
+/* Authentic Manuscript Header & Navigation Folios */
+[data-theme="vintage"] header {
+  background-color: #eee3ce !important;
+  background-image: 
+    linear-gradient(180deg, rgba(255, 253, 247, 0.6) 0%, rgba(238, 227, 206, 0.6) 100%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='branaHdr'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0.35 0 0 0 0.18  0 0.28 0 0 0.12  0 0 0.20 0 0.08  0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23branaHdr)'/%3E%3C/svg%3E") !important;
+  border-bottom-color: #c9b48e !important;
+  box-shadow: 0 2px 10px rgba(45, 25, 8, 0.07), inset 0 -1px 0 rgba(201, 180, 142, 0.4) !important;
+}
+
+[data-theme="vintage"] nav#persistent-monastic-navigation {
+  background-color: #eee3ce !important;
+  background-image: 
+    linear-gradient(0deg, rgba(255, 253, 247, 0.6) 0%, rgba(238, 227, 206, 0.6) 100%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='branaNav'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0.35 0 0 0 0.18  0 0.28 0 0 0.12  0 0 0.20 0 0.08  0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23branaNav)'/%3E%3C/svg%3E") !important;
+  border-top-color: #c9b48e !important;
+  box-shadow: 0 -2px 12px rgba(45, 25, 8, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
+}
+
+/* Aged Parchment Deckle Border / Manuscript Ruling */
+[data-theme="vintage"] .aged-parchment-border {
+  border: 1px solid #c9b48e;
+  box-shadow: 
+    inset 0 0 20px rgba(186, 155, 108, 0.18),
+    0 2px 8px rgba(55, 32, 12, 0.07);
+}
+
+/* Manuscript Section Rubrics */
+[data-theme="vintage"] .rubric-border {
+  border-left-color: var(--crimson);
+}
+
+[data-theme="vintage"] .scholar-focus:focus {
+  outline-color: var(--scholar-green);
+}
+
+[data-theme="vintage"] .manuscript-quote {
+  border-left: 3px solid var(--crimson);
+  background-color: rgba(234, 224, 203, 0.6);
+  box-shadow: inset 0 0 12px rgba(197, 175, 137, 0.18);
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: #27120a;
+}
+
+/* Drop-cap for classic scripture & philosophical readings */
+[data-theme="vintage"] .parchment-drop-cap::first-letter {
+  font-family: var(--font-display, var(--font-serif));
+  float: left;
+  font-size: 3.2em;
+  line-height: 0.82;
+  padding-top: 4px;
+  padding-right: 8px;
+  padding-bottom: 2px;
+  color: var(--crimson);
+  font-weight: 700;
+}
+
+/* Semantic Theme Helpers */
+.bg-theme-main {
+  background-color: var(--text-main);
+  color: #ffffff;
+}
+.bg-theme-main:hover {
+  opacity: 0.92;
+}
+.bg-theme-app { background-color: var(--bg-app); }
+.bg-theme-surface { background-color: var(--bg-surface); }
+.bg-theme-subtle { background-color: var(--bg-subtle); }
+.bg-theme-muted { background-color: var(--bg-muted); }
+.border-theme { border-color: var(--border-color); }
+.border-theme-subtle { border-color: var(--border-subtle); }
+.text-theme-main { color: var(--text-main); }
+.text-theme-surface { color: var(--bg-surface); }
+.text-theme-body { color: var(--text-body); }
+.text-theme-muted { color: var(--text-muted); }
+.text-theme-subtle { color: var(--text-subtle); }
+.text-theme-accent { color: var(--accent); }
+.bg-theme-accent { background-color: var(--accent); }
+.bg-theme-accent-light { background-color: var(--accent-light); }
+.text-theme-gold { color: var(--gold); }
+
+/* Night Mode (Dark) Primary Button Contrast Protection */
+[data-theme="dark"] .bg-theme-main,
+[data-theme="dark"] button.bg-theme-main,
+[data-theme="dark"] a.bg-theme-main {
+  background-color: #262b35 !important;
+  color: #f7f6f2 !important;
+  border: 1px solid #3c4352;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+[data-theme="dark"] .bg-theme-main:hover,
+[data-theme="dark"] button.bg-theme-main:hover,
+[data-theme="dark"] a.bg-theme-main:hover {
+  background-color: #313744 !important;
+  color: #ffffff !important;
+}
+[data-theme="dark"] .bg-theme-main *,
+[data-theme="dark"] button.bg-theme-main * {
+  color: #f7f6f2 !important;
+}
+
+/* Historical Manuscript Palette Helpers */
+.text-theme-crimson { color: var(--crimson); }
+.bg-theme-crimson { background-color: var(--crimson); }
+.bg-theme-crimson-light { background-color: var(--crimson-light); }
+.border-theme-crimson { border-color: var(--crimson); }
+.border-theme-crimson-subtle { border-color: var(--crimson-border); }
+
+.text-theme-brass { color: var(--brass); }
+.bg-theme-brass { background-color: var(--brass); }
+.border-theme-brass { border-color: var(--brass); }
+
+.text-theme-mahogany { color: var(--mahogany); }
+.bg-theme-mahogany { background-color: var(--mahogany); }
+.border-theme-mahogany { border-color: var(--mahogany); }
+
+.text-theme-scholar { color: var(--scholar-green); }
+.bg-theme-scholar { background-color: var(--scholar-green); }
+.border-theme-scholar { border-color: var(--scholar-green); }
+
+.bg-theme-parchment { background-color: var(--parchment); }
+
+/* Vintage Manuscript Accents */
+[data-theme="vintage"] .rubric-border {
+  border-left-color: var(--crimson);
+}
+[data-theme="vintage"] .scholar-focus:focus {
+  outline-color: var(--scholar-green);
+}
+[data-theme="vintage"] .manuscript-quote {
+  border-left: 3px solid var(--crimson);
+  background-color: var(--bg-subtle);
+}
+
+/* Light Mode: Light Blue & Golden Card Accents */
+[data-theme="light"], :root:not([data-theme="vintage"]):not([data-theme="dark"]):not([data-theme="navy"]):not([data-theme="burgundy"]):not([data-theme="gray"]):not([data-theme="brown"]) {
+  .bg-theme-surface {
+    background-color: #ffffff;
+    box-shadow: 0 1px 4px 0 rgba(2, 132, 199, 0.05), 0 4px 14px -2px rgba(212, 175, 55, 0.07);
+  }
+  .bg-theme-subtle {
+    background-color: #f0f7ff;
+  }
+  .border-theme {
+    border-color: #cbdff7;
+  }
+  .border-theme-subtle {
+    border-color: #e2effd;
+  }
+}
+
+/* Deep Lapis & Golden Theme Card Accents */
+[data-theme="navy"] {
+  .bg-theme-surface {
+    background-color: #ffffff;
+    box-shadow: 0 1px 4px 0 rgba(10, 31, 61, 0.06), 0 4px 14px -2px rgba(212, 175, 55, 0.07);
+  }
+  .bg-theme-subtle {
+    background-color: #e8f0fe;
+  }
+  .border-theme {
+    border-color: #c0d6f6;
+  }
+  .border-theme-subtle {
+    border-color: #dbe7fa;
+  }
+}
+
+/* Imperial Burgundy & Crimson Theme Card Accents */
+[data-theme="burgundy"] {
+  .bg-theme-surface {
+    background-color: #ffffff;
+    box-shadow: 0 1px 4px 0 rgba(136, 19, 55, 0.06), 0 4px 14px -2px rgba(212, 175, 55, 0.06);
+  }
+  .bg-theme-subtle {
+    background-color: #fcedec;
+  }
+  .border-theme {
+    border-color: #ebbfbc;
+  }
+  .border-theme-subtle {
+    border-color: #f5dedd;
+  }
+}
+
+/* Monastic Slate & Gray Theme Card Accents */
+[data-theme="gray"] {
+  .bg-theme-surface {
+    background-color: #ffffff;
+    box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 4px 12px -2px rgba(15, 23, 42, 0.04);
+  }
+  .bg-theme-subtle {
+    background-color: #f1f5f9;
+  }
+  .border-theme {
+    border-color: #cbd5e1;
+  }
+  .border-theme-subtle {
+    border-color: #e2e8f0;
+  }
+}
+
+/* Monastic Cream & Espresso Theme Card Accents */
+[data-theme="cream"] {
+  .bg-theme-surface {
+    background-color: #ffffff;
+    box-shadow: 0 1px 3px 0 rgba(43, 24, 16, 0.04), 0 4px 12px -2px rgba(43, 24, 16, 0.05);
+  }
+  .bg-theme-subtle {
+    background-color: #f7f2ea;
+  }
+  .border-theme {
+    border-color: #dfd5c6;
+  }
+  .border-theme-subtle {
+    border-color: #ede5d8;
+  }
+}
+
+/* Warm Brown & Cream Theme Card Accents */
+[data-theme="brown"] {
+  .bg-theme-surface {
+    background-color: #fffdf9;
+    box-shadow: 0 1px 4px 0 rgba(74, 46, 27, 0.05), 0 4px 14px -2px rgba(120, 62, 25, 0.06);
+  }
+  .bg-theme-subtle {
+    background-color: #f4ecdd;
+  }
+  .border-theme {
+    border-color: #dfceb2;
+  }
+  .border-theme-subtle {
+    border-color: #eee3ce;
+  }
+}
+
+.font-marginalia {
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.03em;
+}
+
+.font-label-md {
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+}
+
+.font-label-lg {
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: 0.04em;
+}
+
+.font-headline-sm {
+  font-family: var(--font-serif);
+}
+
+.font-headline-md {
+  font-family: var(--font-serif);
+}
+
+.font-headline-lg {
+  font-family: var(--font-serif);
+}
+
+.font-headline-lg-mobile {
+  font-family: var(--font-serif);
+}
+
+.font-display-lg {
+  font-family: var(--font-serif);
+}
+
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Custom scrollbar concealment */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Delicate thin outline for supporting icons */
+.material-symbols-thin {
+  font-variation-settings: 'wght' 200, 'FILL' 0, 'opsz' 20;
+}
+
