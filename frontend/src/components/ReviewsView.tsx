@@ -35,8 +35,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const [isWriteReviewOpen, setIsWriteReviewOpen] = useState(false);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
 
-  // Local state for likes, saved reviews, active comment drawers, and three-dots menu
-  const [likedReviews, setLikedReviews] = useState<Record<string, boolean>>({});
+  // Local state for saved reviews, active comment drawers, and three-dots menu
   const [savedReviews, setSavedReviews] = useState<Record<string, boolean>>({});
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
@@ -87,17 +86,18 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
 
   const handleToggleLike = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const isCurrentlyLiked = likedReviews[id] ?? false;
+    const rev = reviews.find(r => r.id === id);
+    if (!rev) return;
+
+    const isCurrentlyLiked = rev.userLiked ?? false;
     const nextState = !isCurrentlyLiked;
-    setLikedReviews(prev => ({ ...prev, [id]: nextState }));
-    if (onUpdateReview) {
-      const rev = reviews.find(r => r.id === id);
-      const currentCount = rev?.likesCount ?? (rev?.id === 'rev-2' ? 68 : rev?.id === 'rev-1' ? 42 : 25);
-      onUpdateReview(id, {
-        userLiked: nextState,
-        likesCount: nextState ? currentCount + 1 : Math.max(0, currentCount - 1)
-      });
-    }
+    const currentCount = rev.likesCount ?? (rev.id === 'rev-2' ? 68 : rev.id === 'rev-1' ? 42 : 25);
+
+    onUpdateReview?.(id, {
+      userLiked: nextState,
+      likesCount: nextState ? currentCount + 1 : Math.max(0, currentCount - 1)
+    });
+
     onShowToast(nextState ? 'Liked review' : 'Removed like');
   };
 
@@ -353,8 +353,8 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
         {/* Reviews Cards: Responsive Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredReviews.map((rev) => {
-            const isLiked = likedReviews[rev.id] ?? rev.userLiked ?? false;
-            const likesCount = (rev.likesCount ?? (rev.id === 'rev-2' ? 68 : rev.id === 'rev-1' ? 42 : 25)) + (likedReviews[rev.id] !== undefined ? (likedReviews[rev.id] ? 1 : 0) : 0);
+            const isLiked = rev.userLiked ?? false;
+            const likesCount = rev.likesCount ?? (rev.id === 'rev-2' ? 68 : rev.id === 'rev-1' ? 42 : 25);
             const isSaved = savedReviews[rev.id] ?? rev.userSaved ?? false;
             const comments = localCommentsList[rev.id] || [];
             const isCommentDrawerOpen = activeCommentId === rev.id;
