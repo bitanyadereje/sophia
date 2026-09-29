@@ -327,8 +327,7 @@ export const App: React.FC = () => {
 
   const handleToggleBookmark = (id: string) => {
     setBookmarks(prev =>
-      prev.map(b => (b.id === id ? { ...b, active: b.active !== false ? false : true } : b))
-    );
+prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
   };
 
   const handleAuthenticated = (name: string, email: string) => {

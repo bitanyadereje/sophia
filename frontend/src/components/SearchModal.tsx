@@ -94,8 +94,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                           {qItem.title}
                         </span>
                         <span className="text-[11px] text-theme-muted truncate">
-                          {qItem.author} · {qItem.responsesCount} {isAmharic ? 'ምላሾች' : 'responses'}
-                        </span>
+{qItem.author} · {qItem.repliesCount} {isAmharic ? 'ምላሾች' : 'responses'}                        </span>
                       </div>
                     </div>
                     <span className="material-symbols-outlined text-[16px] text-theme-subtle">chevron_right</span>

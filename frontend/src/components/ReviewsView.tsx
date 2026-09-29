@@ -171,8 +171,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     setEditingReview(r);
     setNewBookTitle(r.bookTitle);
     setNewBookAuthor(r.bookAuthor);
-    setNewTradition(r.tradition);
-    setNewRating(r.rating);
+setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteriology');    setNewRating(r.rating);
     setNewQuote(r.quote.replace(/^[“"]|[”"]$/g, ''));
     setNewCitation(r.citation);
     setNewFullReview(r.fullReview || '');

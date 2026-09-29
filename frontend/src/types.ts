@@ -13,7 +13,8 @@ export type ScreenId =
   | 'review-detail'
   | 'notes'
   | 'profile'
-  | 'auth';
+   | 'auth'
+  | 'bookmarks';
 
 export type ReadingStatus = 'want-to-read' | 'currently-reading' | 'read' | 'dnf';
 
