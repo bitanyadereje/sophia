@@ -32,7 +32,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentScreen, onNavigate,
     { id: 'home', label: isAmharic ? 'መነሻ' : 'Home', icon: 'temple_buddhist' },
     { id: 'discussions', label: isAmharic ? 'ውይይቶች' : 'Discussions', icon: 'forum' },
     { id: 'paths', label: isAmharic ? 'የሶፊያ መንገዶች' : 'Sophia paths', icon: 'alt_route' },
-    { id: 'library', label: isAmharic ? 'የተቀመጡ' : 'Saved', icon: 'bookmarks' }
+    { id: 'profile', label: isAmharic ? 'መገለጫ' : 'Profile', icon: 'person' }
   ];
 
   const getNavContainerClasses = () => {

@@ -42,18 +42,18 @@ export const Header: React.FC<HeaderProps> = ({
     setIsMobileMenuOpen(false);
   };
 
-  const primaryNavLinks: { id: ScreenId; label: string }[] = [
-    { id: 'home', label: t('nav.home', 'Home') },
-    { id: 'paths', label: t('nav.paths', 'Paths') },
-    { id: 'library', label: t('nav.saved', 'Saved') },
-    { id: 'discussions', label: t('nav.discussions', 'Discussions') },
-    { id: 'reviews', label: t('nav.reviews', 'Reviews') }
-  ];
+const primaryNavLinks: { id: ScreenId; label: string }[] = [
+  { id: 'home', label: t('nav.home', 'Home') },
+  { id: 'paths', label: t('nav.paths', 'Paths') },
+  { id: 'library', label: t('nav.saved', 'Saved') },
+  { id: 'discussions', label: t('nav.discussions', 'Discussions') },
+  { id: 'reviews', label: t('nav.reviews', 'Reviews') }
+];
 
   const allMobileNavLinks: { id: ScreenId; label: string; icon: string; desc: string }[] = [
     { id: 'home', label: isAmharic ? 'የማህበረሰብ ዜናዎች' : 'Community Feed', icon: 'temple_buddhist', desc: isAmharic ? 'የውይይቶች እና የመጽሐፍ ዳሰሳዎች ዜና' : 'Discussions & reviews feed' },
     { id: 'paths', label: isAmharic ? 'የንባብ መንገዶች' : 'Reading Paths', icon: 'alt_route', desc: isAmharic ? 'የተዘጋጁ የንባብ መርሃ-ግብሮች' : 'Guided reading plans & topics' },
-    { id: 'library', label: isAmharic ? 'የተቀመጡ' : 'Saved', icon: 'bookmarks', desc: isAmharic ? 'የተቀመጡ ጥቅሶች እና ማስታወሻዎች' : 'Saved bookmarks and personal notes' },
+    { id: 'library', label: isAmharic ? 'የተቀመጡ መጽሐፎች' : 'Saved Books', icon: 'bookmark', desc: isAmharic ? 'የእርስዎ የተቀመጡ መጽሐፎች' : 'Your saved books' },
     { id: 'notes', label: isAmharic ? 'የግል ማስታወሻዎች' : 'Private Notes', icon: 'edit_note', desc: isAmharic ? 'የእርስዎ የግል ማስታወሻዎች' : 'Your private notes and thoughts' },
     { id: 'colloquium', label: isAmharic ? 'የመጽሐፍ ውይይቶች' : 'Book Discussions', icon: 'school', desc: isAmharic ? 'የጥራዞች ማውጫ እና የጽሑፍ ሴሚናሮች' : 'Volume directory & text seminars' },
     { id: 'discussions', label: isAmharic ? 'የማህበረሰብ ጥያቄና መልስ' : 'Community Q&A', icon: 'forum', desc: isAmharic ? 'ጥያቄዎችን ይጠይቁ እና መልሶችን ያንብቡ' : 'Ask questions and read answers' },
@@ -382,7 +382,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand Logo & Title */}
         <button
           id="header-brand-logo"
-          onClick={() => handleNavClick('library')}
+          onClick={() => handleNavClick('profile')}
           className="flex items-center gap-2 sm:gap-2.5 text-left group focus:outline-none cursor-pointer flex-shrink-0"
           title={isAmharic ? 'ሶፊያ - ወደ ቤተ-መጻሕፍት ተመለስ' : 'Sophia - Return to Library'}
           aria-label={isAmharic ? 'ሶፊያ - ወደ ቤተ-መጻሕፍት ተመለስ' : 'Sophia - Return to Library'}
