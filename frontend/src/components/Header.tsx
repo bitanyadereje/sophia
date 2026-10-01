@@ -380,12 +380,9 @@ const primaryNavLinks: { id: ScreenId; label: string }[] = [
     <header className={`fixed top-0 w-full z-40 pt-safe transition-colors duration-200 ${getHeaderClasses()}`}>
       <div className="h-16 px-3.5 sm:px-6 lg:px-8 flex items-center justify-between max-w-7xl mx-auto w-full gap-2 sm:gap-4">
         {/* Brand Logo & Title */}
-        <button
+        <div
           id="header-brand-logo"
-          onClick={() => handleNavClick('profile')}
-          className="flex items-center gap-2 sm:gap-2.5 text-left group focus:outline-none cursor-pointer flex-shrink-0"
-          title={isAmharic ? 'ሶፊያ - ወደ ቤተ-መጻሕፍት ተመለስ' : 'Sophia - Return to Library'}
-          aria-label={isAmharic ? 'ሶፊያ - ወደ ቤተ-መጻሕፍት ተመለስ' : 'Sophia - Return to Library'}
+          className="flex items-center gap-2 sm:gap-2.5 text-left group focus:outline-none flex-shrink-0"
         >
           {/* Sophia Logo Icon */}
           <div
@@ -401,7 +398,7 @@ const primaryNavLinks: { id: ScreenId; label: string }[] = [
               {t('brand.subtitle', isAmharic ? 'ታሪካዊ ቤተ-መጻሕፍት' : 'Historical Library')}
             </span>
           </div>
-        </button>
+        </div>
 
         {/* Desktop Navigation Links */}
         <nav className="hidden md:flex items-center gap-1 sm:gap-1.5 lg:gap-2">
@@ -557,6 +554,16 @@ const primaryNavLinks: { id: ScreenId; label: string }[] = [
               </div>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => handleNavClick('profile')}
+            aria-label={t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile')}
+            className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${getGhostBtnClasses()}`}
+            title={t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile')}
+          >
+            <span className="material-symbols-outlined text-[20px]">person</span>
+          </button>
 
           {/* Mobile Hamburger Navigation Button (Ghost Button) */}
           <button
