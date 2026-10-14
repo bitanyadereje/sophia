@@ -68,47 +68,23 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   }, [targetReviewId]);
 
   // Review form
-  const [newBookTitle, setNewBookTitle] = useState('');
-  const [newBookAuthor, setNewBookAuthor] = useState('');
-  const [newTradition, setNewTradition] = useState<'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteriology'>('Patristic');
+  const [newBookId, setNewBookId] = useState('');
   const [newRating, setNewRating] = useState(5.0);
   const [newQuote, setNewQuote] = useState('');
-  const [newCitation, setNewCitation] = useState('');
   const [newFullReview, setNewFullReview] = useState('');
-  const [newKeyThemes, setNewKeyThemes] = useState('');
 
   const traditions = ['All', 'Patristic', 'Orthodox', 'Scholastic', 'Soteriology'];
-
-  const isAuthor = (r: Review) => {
-    if (!currentUser?.name || !r.reviewerName) return false;
-    return r.reviewerName.trim().toLowerCase() === currentUser.name.trim().toLowerCase();
-  };
+  const isAuthor = (r: Review) => Boolean(currentUser?.name && r.user_id === currentUser.name);
 
   const handleToggleLike = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const rev = reviews.find(r => r.id === id);
-    if (!rev) return;
-
-    const isCurrentlyLiked = rev.userLiked ?? false;
-    const nextState = !isCurrentlyLiked;
-    const currentCount = rev.likesCount ?? (rev.id === 'rev-2' ? 68 : rev.id === 'rev-1' ? 42 : 25);
-
-    onUpdateReview?.(id, {
-      userLiked: nextState,
-      likesCount: nextState ? currentCount + 1 : Math.max(0, currentCount - 1)
-    });
-
-    onShowToast(nextState ? 'Liked review' : 'Removed like');
+    onShowToast('Likes are not available here yet');
   };
 
   const handleToggleSave = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const isCurrentlySaved = savedReviews[id] ?? false;
-    const nextState = !isCurrentlySaved;
+    const nextState = !(savedReviews[id] ?? false);
     setSavedReviews(prev => ({ ...prev, [id]: nextState }));
-    if (onUpdateReview) {
-      onUpdateReview(id, { userSaved: nextState });
-    }
     onShowToast(nextState ? 'Saved review to bookmarks' : 'Removed review from bookmarks');
   };
 
@@ -122,43 +98,24 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     e.stopPropagation();
     const text = commentInputs[reviewId]?.trim();
     if (!text) return;
-
-    const newComment = {
-      id: `comm-${Date.now()}`,
-      author: currentUser?.name || 'Beatrice Moreau',
-      text,
-      timeAgo: 'Just now'
-    };
-
-    setLocalCommentsList(prev => ({
-      ...prev,
-      [reviewId]: [...(prev[reviewId] || []), newComment]
-    }));
-
+    const newComment = { id: `comm-${Date.now()}`, author: currentUser?.name || 'Reader', text, timeAgo: isAmharic ? '???' : 'Just now' };
+    setLocalCommentsList(prev => ({ ...prev, [reviewId]: [...(prev[reviewId] || []), newComment] }));
     setCommentInputs(prev => ({ ...prev, [reviewId]: '' }));
     onShowToast('Comment posted to review');
   };
 
   const handleCardClick = (rev: Review) => {
-    if (onSelectReview) {
-      onSelectReview(rev.id);
-    } else if (rev.bookId && onSelectBook) {
-      onSelectBook(rev.bookId);
-    } else {
-      onNavigate('colloquium');
-    }
+    if (onSelectReview) onSelectReview(rev.id);
+    else if (rev.book_id && onSelectBook) onSelectBook(rev.book_id);
+    else onNavigate('colloquium');
   };
 
   const handleOpenNewReview = () => {
     setEditingReview(null);
-    setNewBookTitle('');
-    setNewBookAuthor('');
-    setNewTradition('Patristic');
+    setNewBookId('');
     setNewRating(5.0);
     setNewQuote('');
-    setNewCitation('');
     setNewFullReview('');
-    setNewKeyThemes('');
     setIsWriteReviewOpen(true);
   };
 
@@ -169,98 +126,55 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       return;
     }
     setEditingReview(r);
-    setNewBookTitle(r.bookTitle);
-    setNewBookAuthor(r.bookAuthor);
-setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteriology');    setNewRating(r.rating);
-    setNewQuote(r.quote.replace(/^[“"]|[”"]$/g, ''));
-    setNewCitation(r.citation);
-    setNewFullReview(r.fullReview || '');
-    setNewKeyThemes(r.keyThemes ? r.keyThemes.join(', ') : '');
+    setNewBookId(r.book_id);
+    setNewRating(r.rating);
+    setNewQuote(r.quote || '');
+    setNewFullReview(r.content);
     setIsWriteReviewOpen(true);
   };
 
   const handleDeleteReview = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const target = reviews.find((item) => item.id === id);
+    const target = reviews.find(item => item.id === id);
     if (target && !isAuthor(target)) {
       onShowToast('You can only delete reviews you have written.');
       return;
     }
-    if (onDeleteReview) {
-      onDeleteReview(id);
-    }
+    onDeleteReview?.(id);
     onShowToast('Review deleted');
   };
 
-  const filteredReviews = reviews.filter((r) => {
-    if (selectedTradition !== 'All' && r.tradition !== selectedTradition) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      return (
-        r.bookTitle.toLowerCase().includes(q) ||
-        r.bookAuthor.toLowerCase().includes(q) ||
-        r.reviewerName.toLowerCase().includes(q) ||
-        r.quote.toLowerCase().includes(q)
-      );
-    }
-    return true;
+  const filteredReviews = reviews.filter(r => {
+    if (selectedTradition !== 'All') return false;
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (r.title || '').toLowerCase().includes(q) || r.book_id.toLowerCase().includes(q) ||
+      r.user_id.toLowerCase().includes(q) || (r.quote || '').toLowerCase().includes(q) || r.content.toLowerCase().includes(q);
   });
 
   const handleSubmitReview = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newBookTitle.trim() || !newQuote.trim()) return;
-
-    const parsedThemes = newKeyThemes
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
-
+    if (!newBookId.trim() || !newQuote.trim()) return;
+    const values = { book_id: newBookId, rating: newRating, quote: newQuote, content: newFullReview.trim() || newQuote.trim() };
     if (editingReview && onUpdateReview) {
-      onUpdateReview(editingReview.id, {
-        bookTitle: newBookTitle,
-        bookAuthor: newBookAuthor || 'Historical Author',
-        tradition: newTradition,
-        rating: newRating,
-        quote: `“${newQuote.replace(/^[“"]|[”"]$/g, '')}”`,
-        citation: newCitation || 'Source Reference',
-        fullReview: newFullReview.trim() || newQuote.trim(),
-        keyThemes: parsedThemes.length > 0 ? parsedThemes : undefined
-      });
+      onUpdateReview(editingReview.id, values);
       onShowToast('Review updated');
     } else {
+      if (!currentUser) return;
+      const now = new Date().toISOString();
       const created: Review = {
-        id: `rev-${Date.now()}`,
-        bookTitle: newBookTitle,
-        bookAuthor: newBookAuthor || 'Historical Author',
-        tradition: newTradition,
-        rating: newRating,
-        reviewerName: currentUser?.name || 'Beatrice Moreau',
-        reviewerAffiliation: currentUser?.title || (isAmharic ? 'የሶፊያ አንባቢ' : 'Sophia Reader'),
-        reviewerAvatar:
-          currentUser?.avatar ||
-          'https://lh3.googleusercontent.com/aida-public/AB6AXuC6SXLN7BmYMhMaHuQx6dHdGP7WSd8gbDml9nW92fqjiNQk4_iMslB3RGC5D_6BZzOnYcL2Zh66XVylOLICR1N7YwIqLTCg2F4NCIRD5oyIZLvleFHsSP1hcr3UeQJUDsUROeWS2K0TjEy9M_eQJjQFQqw-ru56VlLRKmCvbCMvrAEumn6YT9dS3OXU3k2CpGD3iDmB8eyULvQTX7yMnP-qk8WtEoickeJeA_ZxOWEd0v-sVX7e5e1xgA',
-        date: 'Today',
-        quote: `“${newQuote.replace(/^[“"]|[”"]$/g, '')}”`,
-        citation: newCitation || 'Source Reference',
-        discussionCount: 0,
-        fullReview: newFullReview.trim() || newQuote.trim(),
-        keyThemes: parsedThemes.length > 0 ? parsedThemes : [newTradition]
+        id: `rev-${Date.now()}`, user_id: currentUser.name, ...values, title: null,
+        created_at: now, updated_at: now
       };
-
       onAddReview(created);
       onShowToast('Review published');
     }
-
-    setNewBookTitle('');
-    setNewBookAuthor('');
+    setNewBookId('');
     setNewQuote('');
-    setNewCitation('');
     setNewFullReview('');
-    setNewKeyThemes('');
     setEditingReview(null);
     setIsWriteReviewOpen(false);
   };
-
   return (
     <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
       <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6">
@@ -352,9 +266,9 @@ setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteri
         {/* Reviews Cards: Responsive Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredReviews.map((rev) => {
-            const isLiked = rev.userLiked ?? false;
-            const likesCount = rev.likesCount ?? (rev.id === 'rev-2' ? 68 : rev.id === 'rev-1' ? 42 : 25);
-            const isSaved = savedReviews[rev.id] ?? rev.userSaved ?? false;
+            const isLiked = false;
+            const likesCount = 0;
+            const isSaved = savedReviews[rev.id] ?? false;
             const comments = localCommentsList[rev.id] || [];
             const isCommentDrawerOpen = activeCommentId === rev.id;
 
@@ -375,19 +289,19 @@ setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteri
                     {/* Reviewer Identity Block */}
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <img
-                        src={rev.reviewerAvatar}
-                        alt={rev.reviewerName}
+                        src={currentUser?.avatar || ""}
+                        alt={rev.user_id}
                         className="w-9 h-9 rounded-full object-cover ring-1 ring-black/10 flex-shrink-0"
                       />
                       <div className="flex flex-col min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span className="font-label-lg text-sm text-theme-main font-semibold truncate">
-                            {rev.reviewerName}
+                            {rev.user_id}
                           </span>
                         </div>
                         {/* Institution/Location: Expands into available space before ellipsis */}
-                        <span className="text-[11px] text-theme-muted truncate" title={rev.reviewerAffiliation}>
-                          {rev.reviewerAffiliation}
+                        <span className="text-[11px] text-theme-muted truncate" title={currentUser?.title || ""}>
+                          {currentUser?.title || ""}
                         </span>
                       </div>
                     </div>
@@ -451,7 +365,7 @@ setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteri
 
                       {/* Standardize Date Alignment: Strict right-aligned grid, Text-Muted for all dates */}
                       <span className="text-[11px] text-theme-muted font-sans text-right tracking-tight tabular-nums whitespace-nowrap">
-                        {rev.date}
+                        {rev.created_at}
                       </span>
                     </div>
                   </div>
@@ -460,15 +374,15 @@ setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteri
                   <div className="my-3 space-y-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <h4 className="font-serif text-[15px] font-bold text-theme-main truncate leading-tight">
-                        {rev.bookTitle}
+                        {rev.title || rev.book_id}
                       </h4>
                       {/* Category Tag: Demoted to Secondary / Surface-variant color */}
                       <span className="text-[10px] font-sans font-medium uppercase tracking-wider text-theme-muted bg-theme-subtle border border-theme/60 px-2 py-0.5 rounded-full flex-shrink-0">
-                        {rev.tradition}
+                        {isAmharic ? '????' : 'Review'}
                       </span>
                     </div>
                     <p className="text-xs text-theme-muted font-serif truncate">
-                      by {rev.bookAuthor}
+                      {isAmharic ? '?' : 'by'} {rev.user_id}
                     </p>
 
                     {/* Star Ratings: Positioned under title and author */}
@@ -491,13 +405,8 @@ setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteri
                   {/* Primary Quote & Citation: Clean typographic hierarchy with NO hard divider */}
                   <div className="space-y-1.5 my-2.5">
                     <blockquote className="font-serif text-[14px] sm:text-[15px] text-theme-main italic leading-relaxed pl-3.5 border-l-2 border-theme-accent">
-                      &ldquo;{rev.quote}&rdquo;
+                      &ldquo;{rev.quote || ""}&rdquo;
                     </blockquote>
-                    {rev.citation && (
-                      <p className="pl-3.5 text-xs font-serif font-light text-theme-muted italic">
-                        — {rev.citation}
-                      </p>
-                    )}
                   </div>
                 </div>
 
@@ -535,8 +444,8 @@ setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteri
                       <span className="font-sans">
                         {comments.length > 0
                           ? (isAmharic ? `${comments.length} አስተያየቶች` : `${comments.length} Comments`)
-                          : rev.discussionCount > 0
-                          ? (isAmharic ? `${rev.discussionCount} ውይይቶች` : `${rev.discussionCount} Discussions`)
+                          : 0 > 0
+                          ? (isAmharic ? `${0} ውይይቶች` : `${0} Discussions`)
                           : (isAmharic ? 'አስተያየት' : 'Comment')}
                       </span>
                     </button>
@@ -660,53 +569,9 @@ setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteri
                   <input
                     type="text"
                     required
-                    value={newBookTitle}
-                    onChange={(e) => setNewBookTitle(e.target.value)}
+                    value={newBookId}
+                    onChange={(e) => setNewBookId(e.target.value)}
                     placeholder="e.g. Confessions, De Trinitate"
-                    className="w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1">
-                    {isAmharic ? 'ደራሲ' : 'Author'}
-                  </label>
-                  <input
-                    type="text"
-                    value={newBookAuthor}
-                    onChange={(e) => setNewBookAuthor(e.target.value)}
-                    placeholder="e.g. Augustine of Hippo"
-                    className="w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1">
-                    {isAmharic ? 'ትውፊት' : 'Tradition'}
-                  </label>
-                  <select
-                    value={newTradition}
-                    onChange={(e) => setNewTradition(e.target.value as any)}
-                    className="w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
-                  >
-                    <option value="Patristic">{isAmharic ? 'ፓትሪስቲክ' : 'Patristic'}</option>
-                    <option value="Orthodox">{isAmharic ? 'ኦርቶዶክስ' : 'Orthodox'}</option>
-                    <option value="Scholastic">{isAmharic ? 'ስኮላስቲክ' : 'Scholastic'}</option>
-                    <option value="Soteriology">{isAmharic ? 'ሶቴሪዮሎጂ' : 'Soteriology'}</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1">
-                    {isAmharic ? 'ደረጃ (1.0 – 5.0)' : 'Rating (1.0 – 5.0)'}
-                  </label>
-                  <input
-                    type="number"
-                    min="1.0"
-                    max="5.0"
-                    step="0.1"
-                    value={newRating}
-                    onChange={(e) => setNewRating(parseFloat(e.target.value))}
                     className="w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
                   />
                 </div>
@@ -739,32 +604,6 @@ setNewTradition(r.tradition as 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteri
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1">
-                    {isAmharic ? 'ምንጭ / ምዕራፍ (አማራጭ)' : 'Citation (Optional)'}
-                  </label>
-                  <input
-                    type="text"
-                    value={newCitation}
-                    onChange={(e) => setNewCitation(e.target.value)}
-                    placeholder="e.g. Book VIII.12 or CCL 27"
-                    className="w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-xs text-theme-main focus:outline-none focus:border-theme-accent font-sans"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1">
-                    {isAmharic ? 'ዋና ዋና ጭብጦች' : 'Key Themes (comma-separated)'}
-                  </label>
-                  <input
-                    type="text"
-                    value={newKeyThemes}
-                    onChange={(e) => setNewKeyThemes(e.target.value)}
-                    placeholder="e.g. Memory, Christology, Hesychia"
-                    className="w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-xs text-theme-main focus:outline-none focus:border-theme-accent font-sans"
-                  />
-                </div>
-              </div>
             </div>
 
             <div className="flex gap-2.5 mt-5 pt-3 border-t border-theme">

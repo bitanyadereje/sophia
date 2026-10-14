@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ReadingPath, ReadingStation, ScreenId } from '../types';
+import { ReadingPath, ScreenId } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 
 interface PathsViewProps {
@@ -16,27 +16,10 @@ export const PathsView: React.FC<PathsViewProps> = ({
   onShowToast
 }) => {
   const { isAmharic } = useLanguage();
-  const [activePath, setActivePath] = useState<ReadingPath>(paths[0]);
+  const [activePath, setActivePath] = useState<ReadingPath | null>(paths[0] || null);
   const [isFollowing, setIsFollowing] = useState(true);
-  const [stations, setStations] = useState<ReadingStation[]>(paths[0]?.stations || []);
   const [selectedFilter, setSelectedFilter] = useState<'All' | 'Patristic' | 'Monastic' | 'Historical'>('All');
 
-  const handleToggleStationCompletion = (id: number) => {
-    setStations((prev) =>
-      prev.map((st) => {
-        if (st.id === id) {
-          const updatedCompleted = !st.completed;
-          onShowToast(
-            updatedCompleted
-              ? `Station ${st.numeral} marked completed`
-              : `Station ${st.numeral} returned to active reading`
-          );
-          return { ...st, completed: updatedCompleted };
-        }
-        return st;
-      })
-    );
-  };
 
   const handleToggleFollow = () => {
     setIsFollowing(!isFollowing);
@@ -46,13 +29,13 @@ export const PathsView: React.FC<PathsViewProps> = ({
   const filteredPaths = paths.filter((path) => {
     if (selectedFilter === 'All') return true;
     if (selectedFilter === 'Patristic') {
-      return path.category.toLowerCase().includes('patristic') || path.title.toLowerCase().includes('father');
+      return path.topic.toLowerCase().includes('patristic') || path.title.toLowerCase().includes('father');
     }
     if (selectedFilter === 'Monastic') {
-      return path.category.toLowerCase().includes('monastic') || path.title.toLowerCase().includes('monastic');
+      return path.topic.toLowerCase().includes('monastic') || path.title.toLowerCase().includes('monastic');
     }
     if (selectedFilter === 'Historical') {
-      return path.category.toLowerCase().includes('theology') || path.category.toLowerCase().includes('civic') || path.title.toLowerCase().includes('augustine');
+      return path.topic.toLowerCase().includes('theology') || path.topic.toLowerCase().includes('civic') || path.title.toLowerCase().includes('augustine');
     }
     return true;
   });
@@ -63,7 +46,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
   // DETAIL VIEW: REFINED SYLLABUS & STATIONS
   // =========================================================================
   if (isDetailView) {
-    const completedCount = stations.filter((s) => s.completed).length;
+    if (!activePath) return null;
 
     return (
       <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
@@ -104,20 +87,6 @@ export const PathsView: React.FC<PathsViewProps> = ({
 
           {/* Path Header Hero Panel */}
           <header className="bg-theme-surface border border-theme rounded-2xl p-6 sm:p-7 lg:p-9 shadow-xs flex flex-col gap-3 lg:gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 lg:px-3 py-0.5 rounded-full text-[10px] lg:text-xs font-sans font-semibold uppercase tracking-wider bg-theme-accent-light text-theme-accent border border-theme">
-                  {activePath.category}
-                </span>
-                <span className="text-xs sm:text-sm text-theme-muted font-serif">
-                  {activePath.timeLeft}
-                </span>
-              </div>
-              <span className="text-xs sm:text-sm font-serif font-medium text-theme-accent bg-theme-subtle px-2.5 lg:px-3 py-0.5 rounded-full border border-theme">
-                {activePath.percentage}% Completed
-              </span>
-            </div>
-
             <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main leading-snug">
               {activePath.title}
             </h1>
@@ -125,106 +94,21 @@ export const PathsView: React.FC<PathsViewProps> = ({
               {activePath.description}
             </p>
 
-            {/* Metadata & Progress Details */}
-            <div className="pt-3 lg:pt-4 border-t border-theme/60 mt-1 flex flex-col gap-2.5 lg:gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm text-theme-muted font-serif">
-                <span>
-                  Curator:{' '}
-                  <strong className="text-theme-main font-semibold">
-                    {activePath.curator?.name || 'Prof. Marcus Aurelius Sterling'}
-                  </strong>
-                </span>
-                <span>
-                  Progress:{' '}
-                  <strong className="text-theme-main font-semibold">
-                    {completedCount} of {stations.length} stations completed
-                  </strong>
-                </span>
-              </div>
-              <div className="w-full bg-theme-muted h-2 lg:h-2.5 rounded-full overflow-hidden">
-                <div
-                  className="bg-theme-accent h-full rounded-full transition-all duration-500"
-                  style={{ width: `${(completedCount / Math.max(stations.length, 1)) * 100}%` }}
-                />
-              </div>
+            <div className="pt-3 lg:pt-4 border-t border-theme/60 mt-1 flex flex-wrap items-center gap-2 text-xs sm:text-sm text-theme-muted font-serif">
+              {isAmharic ? '???' : 'Difficulty'}: <strong className="text-theme-main font-semibold">{activePath.difficulty || (isAmharic ? '??????' : 'Not specified')}</strong>
             </div>
           </header>
 
           {/* Sequential Reading Itinerary / Stations */}
           <section className="flex flex-col gap-3">
             <div className="flex items-center gap-3">
-              <h2 className="text-[11px] font-sans font-semibold uppercase tracking-[0.25em] text-theme-muted whitespace-nowrap">
-                READING ITINERARY
-              </h2>
+              <h2 className="text-[11px] font-sans font-semibold uppercase tracking-[0.25em] text-theme-muted whitespace-nowrap">READING ITINERARY</h2>
               <div className="h-px bg-theme w-full flex-1" />
             </div>
-
-            <div className="space-y-3.5">
-              {stations.map((station) => (
-                <article
-                  key={station.id}
-                  className="bg-theme-surface border border-theme rounded-xl p-4 sm:p-5 shadow-xs flex flex-col gap-3 transition-colors hover:border-theme-accent/40"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-7 h-7 rounded-lg bg-theme-subtle border border-theme flex items-center justify-center font-serif text-xs font-bold text-theme-accent flex-shrink-0 mt-0.5">
-                        {station.numeral}
-                      </div>
-                      <div>
-                        <h3 className="font-serif text-base sm:text-lg font-semibold text-theme-main leading-snug">
-                          {station.title}
-                        </h3>
-                        <p className="text-xs text-theme-muted font-serif mt-0.5">
-                          {station.authorEra} {station.weeksLabel ? `· ${station.weeksLabel}` : ''} {station.pages ? `· ${station.pages}` : ''}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Completion Toggle Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleStationCompletion(station.id)}
-                      className={`px-3 py-1.5 rounded-lg border text-xs font-serif font-medium inline-flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs flex-shrink-0 ${
-                        station.completed
-                          ? 'bg-theme-accent-light text-theme-accent border-theme-accent/50 font-semibold'
-                          : 'bg-theme-surface text-theme-muted hover:text-theme-main border-theme hover:bg-theme-subtle'
-                      }`}
-                    >
-                      <span className="material-symbols-outlined text-[16px]">
-                        {station.completed ? 'check_circle' : 'radio_button_unchecked'}
-                      </span>
-                      <span>{station.completed ? (isAmharic ? 'ተጠናቋል' : 'Completed') : (isAmharic ? 'ተጠናቀቀ በል' : 'Mark Done')}</span>
-                    </button>
-                  </div>
-
-                  {station.quote && (
-                    <blockquote className="text-xs sm:text-sm text-theme-body font-serif italic pl-3.5 border-l-2 border-theme-accent/60 my-0.5 leading-relaxed bg-theme-subtle/40 py-1.5 pr-2 rounded-r">
-                      {station.quote}
-                    </blockquote>
-                  )}
-
-                  {/* Station Action Buttons */}
-                  <div className="flex items-center gap-2.5 pt-1 text-xs font-serif">
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('colloquium')}
-                      className="px-3 py-1.5 rounded-lg border border-theme bg-theme-surface hover:bg-theme-subtle text-theme-main inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                    >
-                      <span className="material-symbols-outlined text-[15px] text-theme-accent">forum</span>
-                      <span>{isAmharic ? 'በውይይት ተሳተፍ' : 'Discuss in Colloquium'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('library')}
-                      className="px-3 py-1.5 rounded-lg border border-theme bg-theme-surface hover:bg-theme-subtle text-theme-muted hover:text-theme-main inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                    >
-                      <span className="material-symbols-outlined text-[15px]">edit_note</span>
-                      <span>{isAmharic ? 'ማስታወሻ መዝግብ' : 'Log Note'}</span>
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
+            <article className="bg-theme-surface border border-theme rounded-xl p-4 sm:p-5 shadow-xs flex flex-col gap-3">
+              <h3 className="font-serif text-base sm:text-lg font-semibold text-theme-main">{activePath.title}</h3>
+              <p className="text-xs sm:text-sm text-theme-body font-serif leading-relaxed">{activePath.description || (isAmharic ? '???? ???' : 'No description available.')}</p>
+            </article>
           </section>
         </div>
       </div>
@@ -269,9 +153,6 @@ export const PathsView: React.FC<PathsViewProps> = ({
                   <span className="w-1.5 h-1.5 rounded-full bg-theme-accent animate-pulse" />
                   Active Track
                 </span>
-                <span className="text-xs sm:text-sm font-serif font-semibold text-theme-accent bg-theme-subtle px-2.5 lg:px-3 py-0.5 rounded-full border border-theme">
-                  {enrolledPath.percentage}% Completed
-                </span>
               </div>
 
               <h3
@@ -286,20 +167,13 @@ export const PathsView: React.FC<PathsViewProps> = ({
 
               {/* Progress Metadata Line */}
               <p className="text-xs sm:text-sm lg:text-base text-theme-muted font-serif mt-1">
-                Current station: <strong className="text-theme-main font-semibold">{enrolledPath.currentStepLabel}</strong> • Step {enrolledPath.completedSteps} of {enrolledPath.totalSteps} • {enrolledPath.timeLeft}
+                {isAmharic ? '???' : 'Topic'}: <strong className="text-theme-main font-semibold">{enrolledPath.topic}</strong>
               </p>
 
-              {/* Linear Progress Meter */}
-              <div className="w-full bg-theme-muted h-2 lg:h-2.5 rounded-full overflow-hidden mt-3.5 lg:mt-4">
-                <div
-                  className="bg-theme-accent h-full rounded-full transition-all duration-500"
-                  style={{ width: `${enrolledPath.percentage}%` }}
-                />
-              </div>
 
               <div className="mt-4 lg:mt-5 pt-3 lg:pt-4 border-t border-theme/60 flex items-center justify-between gap-3">
                 <span className="text-xs sm:text-sm text-theme-muted font-serif italic">
-                  {enrolledPath.category}
+                  {enrolledPath.topic}
                 </span>
                 <button
                   type="button"
@@ -362,10 +236,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
                 <div className="flex flex-col gap-1.5 lg:gap-2 flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] lg:text-xs font-sans font-semibold uppercase tracking-wider px-2 lg:px-2.5 py-0.5 rounded bg-theme-subtle border border-theme text-theme-accent">
-                      {path.category}
-                    </span>
-                    <span className="text-xs sm:text-sm font-serif text-theme-muted">
-                      {path.timeLeft}
+                      {path.topic}
                     </span>
                   </div>
 
@@ -383,27 +254,10 @@ export const PathsView: React.FC<PathsViewProps> = ({
                     {path.description}
                   </p>
 
-                  {/* Metadata & Progress */}
+                  {/* Metadata */}
                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:text-sm text-theme-muted font-serif pt-1">
-                    <span>
-                      {isAmharic ? 'አሁን፡ ' : 'Current: '}
-                      <strong className="text-theme-main font-semibold">{path.currentStepLabel}</strong>
-                    </span>
-                    <span>•</span>
-                    <span>
-                      {isAmharic
-                        ? `ደረጃ ${path.completedSteps} ከ ${path.totalSteps} (${path.percentage}%)`
-                        : `Step ${path.completedSteps} of ${path.totalSteps} (${path.percentage}%)`}
-                    </span>
-                  </div>
-
-                  <div className="w-48 lg:w-60 bg-theme-muted h-1.5 lg:h-2 rounded-full overflow-hidden mt-1">
-                    <div
-                      className="bg-theme-accent h-full rounded-full transition-all duration-500"
-                      style={{ width: `${path.percentage}%` }}
-                    />
-                  </div>
-                </div>
+                    {isAmharic ? '???' : 'Difficulty'}: {path.difficulty || (isAmharic ? '??????' : 'Not specified')}
+                  </div>                </div>
 
                 <div className="flex-shrink-0 self-start sm:self-center">
                   <button

@@ -1,16 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { ScreenId, UserProfile, Book, DialecticComment, Question, QuestionReply, ReadingPath, Review, Note, Bookmark, ThemeMode } from './types';
-import {
-  INITIAL_USER,
-  INITIAL_BOOKS,
-  INITIAL_COLLOQUIUM_COMMENTS,
-  INITIAL_QUESTIONS,
-  INITIAL_PATHS,
-  INITIAL_REVIEWS,
-  INITIAL_NOTES,
-  INITIAL_BOOKMARKS
-} from './data/initialData';
-
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { SavedView } from './components/SavedView';
@@ -25,18 +14,56 @@ import { ProfileView } from './components/ProfileView';
 import { HomeFeedView } from './components/HomeFeedView';
 import { AuthModal } from './components/AuthModal';
 import { SearchModal } from './components/SearchModal';
+import { supabase } from './lib/supabase';
+
+// ============================================================
+// Temporary empty defaults (mock data files were deleted)
+// These will be replaced by Supabase fetches as features are built.
+// ============================================================
+const INITIAL_USER: UserProfile = {
+  name: '',
+  title: '',
+  location: '',
+  memberSince: '',
+  avatar: '',
+  booksRead: 0,
+  notesCount: 0,
+  dayStreak: 0,
+  goalTarget: 0,
+  topics: []
+};
+const INITIAL_COLLOQUIUM_COMMENTS: DialecticComment[] = [];
+const INITIAL_QUESTIONS: Question[] = [];
+const INITIAL_PATHS: ReadingPath[] = [];
+const INITIAL_REVIEWS: Review[] = [];
+const INITIAL_NOTES: Note[] = [];
+const INITIAL_BOOKMARKS: Bookmark[] = [];
 
 export const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('home');
   const [user, setUser] = useState<UserProfile>(INITIAL_USER);
   const [theme, setTheme] = useState<ThemeMode>(INITIAL_USER.themePreference || 'light');
-  const [books, setBooks] = useState<Book[]>(INITIAL_BOOKS);
+  const [books, setBooks] = useState<Book[]>([]);
   const [colloquiumComments, setColloquiumComments] = useState<DialecticComment[]>(INITIAL_COLLOQUIUM_COMMENTS);
   const [questions, setQuestions] = useState<Question[]>(INITIAL_QUESTIONS);
   const [paths, setPaths] = useState<ReadingPath[]>(INITIAL_PATHS);
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
   const [notes, setNotes] = useState<Note[]>(INITIAL_NOTES);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(INITIAL_BOOKMARKS);
+
+  // Fetch books from Supabase on mount
+  useEffect(() => {
+    supabase
+      .from('books')
+      .select('*')
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('Failed to load books:', error);
+          return;
+        }
+        setBooks((data ?? []) as Book[]);
+      });
+  }, []);
 
   // Sync theme with DOM data-theme attribute
   useEffect(() => {
@@ -48,20 +75,16 @@ export const App: React.FC = () => {
     setUser((prev) => ({ ...prev, themePreference: newTheme }));
   };
 
-  // Search & Auth modal states
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
 
-  // Reader context
   const [readerContext, setReaderContext] = useState<{ title: string; chapter?: string }>({
     title: "The Confessions",
     chapter: "Book VIII, Chapter 12"
   });
 
-  // Selected volume for Book Discussions & Detail
-  const [selectedBookId, setSelectedBookId] = useState<string>('conf-4');
+  const [selectedBookId, setSelectedBookId] = useState<string>('');
 
-  // Direct target links for discussions and reviews
   const [targetQuestionId, setTargetQuestionId] = useState<string | null>(null);
   const [targetReviewId, setTargetReviewId] = useState<string | null>(null);
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
@@ -85,35 +108,14 @@ export const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleToggleReviewLike = (reviewId: string) => {
-    setReviews((prev) =>
-      prev.map((r) => {
-        if (r.id === reviewId) {
-          const nextLiked = !r.userLiked;
-          const currentCount = r.likesCount ?? 0;
-          return {
-            ...r,
-            userLiked: nextLiked,
-            likesCount: nextLiked ? currentCount + 1 : Math.max(0, currentCount - 1)
-          };
-        }
-        return r;
-      })
-    );
+  // TODO: wire to review_likes table
+  const handleToggleReviewLike = (_reviewId: string) => {
+    // Stub — will be replaced when review likes feature is built
   };
 
-  const handleToggleReviewSave = (reviewId: string) => {
-    setReviews((prev) =>
-      prev.map((r) => {
-        if (r.id === reviewId) {
-          return {
-            ...r,
-            userSaved: !r.userSaved
-          };
-        }
-        return r;
-      })
-    );
+  // TODO: wire to saved_reviews table
+  const handleToggleReviewSave = (_reviewId: string) => {
+    // Stub — will be replaced when review save feature is built
   };
 
   const [previousScreen, setPreviousScreen] = useState<ScreenId>('colloquium');
@@ -133,7 +135,6 @@ export const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Notification toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -153,43 +154,15 @@ export const App: React.FC = () => {
     setUser(prev => ({ ...prev, ...updated }));
   };
 
+  // TODO: wire to library_books table
   const handleUpdateBookStatus = (
-    bookId: string,
-    status: any,
-    userRating?: number,
-    currentPage?: number,
-    currentLocation?: string
+    _bookId: string,
+    _status: any,
+    _userRating?: number,
+    _currentPage?: number,
+    _currentLocation?: string
   ) => {
-    setBooks((prev) =>
-      prev.map((b) => {
-        if (b.id !== bookId) return b;
-        const total = b.totalPages || 100;
-        let prog = b.progress;
-        if (currentPage !== undefined) {
-          prog = Math.min(100, Math.round((currentPage / total) * 100));
-        } else if (status === 'read') {
-          prog = 100;
-        } else if (status === 'want-to-read') {
-          prog = 0;
-        }
-
-        return {
-          ...b,
-          readingStatus: status,
-          progress: prog,
-          currentPage: currentPage !== undefined ? currentPage : b.currentPage,
-          currentLocation: currentLocation !== undefined ? currentLocation : b.currentLocation,
-          userRating: userRating !== undefined ? userRating : b.userRating
-        };
-      })
-    );
-
-    if (status === 'read') {
-      setUser((prev) => ({
-        ...prev,
-        booksRead: (prev.booksRead || 0) + 1
-      }));
-    }
+    // Stub — will be replaced when library feature is built
   };
 
   const handleAddBookmarkFromQuote = (quoteText: string, source: string, author: string) => {
@@ -242,19 +215,13 @@ export const App: React.FC = () => {
       const updated = list.map(item => {
         if (item.id === targetId) {
           found = true;
-          return {
-            ...item,
-            replies: [...(item.replies || []), newRep]
-          };
+          return { ...item, replies: [...(item.replies || []), newRep] };
         }
         if (item.replies && item.replies.length > 0) {
           const res = insertReplyRecursively(item.replies, targetId);
           if (res.found) {
             found = true;
-            return {
-              ...item,
-              replies: res.updated
-            };
+            return { ...item, replies: res.updated };
           }
         }
         return item;
@@ -268,17 +235,9 @@ export const App: React.FC = () => {
         if (parentReplyId) {
           const currentReplies = q.replies || [];
           const { updated } = insertReplyRecursively(currentReplies, parentReplyId);
-          return {
-            ...q,
-            repliesCount: q.repliesCount + 1,
-            replies: updated
-          };
+          return { ...q, repliesCount: q.repliesCount + 1, replies: updated };
         }
-        return {
-          ...q,
-          repliesCount: q.repliesCount + 1,
-          replies: [...(q.replies || []), newRep]
-        };
+        return { ...q, repliesCount: q.repliesCount + 1, replies: [...(q.replies || []), newRep] };
       })
     );
   };
@@ -327,10 +286,11 @@ export const App: React.FC = () => {
 
   const handleToggleBookmark = (id: string) => {
     setBookmarks(prev =>
-prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
+      prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))
+    );
   };
 
-  const handleAuthenticated = (name: string, email: string) => {
+  const handleAuthenticated = (name: string, _email: string) => {
     setUser(prev => ({
       ...prev,
       name,
@@ -341,7 +301,6 @@ prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
 
   return (
     <div className="min-h-screen bg-theme-app text-theme-body relative flex flex-col font-sans antialiased selection:bg-theme-accent-light selection:text-theme-accent transition-colors duration-200">
-      {/* Toast Notification Banner */}
       {toastMessage && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-theme-main text-theme-surface text-xs font-label-md rounded-full shadow-lg border border-theme-subtle/40 flex items-center gap-2 animate-fade-in pointer-events-none">
           <span className="w-2 h-2 rounded-full bg-theme-accent"></span>
@@ -349,7 +308,6 @@ prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
         </div>
       )}
 
-      {/* Global Header */}
       <Header
         currentScreen={currentScreen}
         onNavigate={(s) => {
@@ -362,7 +320,6 @@ prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
         onSetTheme={handleSetTheme}
       />
 
-      {/* Screen Router */}
       <main className="flex-1 flex flex-col">
         {currentScreen === 'home' && (
           <HomeFeedView
@@ -436,7 +393,7 @@ prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
           />
         )}
 
-        {currentScreen === 'book-detail' && (
+        {currentScreen === 'book-detail' && books.length > 0 && (
           <BookDetailView
             book={books.find((b) => b.id === selectedBookId) || books[0]}
             questions={questions}
@@ -457,7 +414,7 @@ prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
           />
         )}
 
-        {currentScreen === 'seminar' && (
+        {currentScreen === 'seminar' && books.length > 0 && (
           <ColloquiumView
             book={books.find((b) => b.id === selectedBookId) || books[0]}
             comments={colloquiumComments}
@@ -519,11 +476,11 @@ prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
           />
         )}
 
-        {currentScreen === 'review-detail' && (
+        {currentScreen === 'review-detail' && reviews.length > 0 && (
           <ReviewDetailView
             review={reviews.find((r) => r.id === (selectedReviewId || targetReviewId)) || reviews[0]}
             currentUser={user}
-            book={books.find((b) => b.id === (reviews.find((r) => r.id === (selectedReviewId || targetReviewId))?.bookId))}
+            book={books.find((b) => b.id === (reviews.find((r) => r.id === (selectedReviewId || targetReviewId))?.book_id))}
             onBack={() => {
               setCurrentScreen('reviews');
               window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -599,7 +556,6 @@ prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
         )}
       </main>
 
-      {/* Global Bottom Navigation */}
       <BottomNav
         currentScreen={currentScreen}
         onNavigate={(s) => {
@@ -609,7 +565,6 @@ prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
         theme={theme}
       />
 
-      {/* Global Search Modal */}
       <SearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
@@ -623,7 +578,6 @@ prev.map(b => (b.id === id ? { ...b, isFavorite: !b.isFavorite } : b))    );
         }}
       />
 
-      {/* Auth / Inscription Modal */}
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}

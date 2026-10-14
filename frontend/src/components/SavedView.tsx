@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { Book, Bookmark, Note, ReadingStatus, ScreenId } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 
@@ -37,18 +37,15 @@ export const SavedView: React.FC<SavedViewProps> = ({
 }) => {
   const { t, isAmharic } = useLanguage();
 
-  // Main Toggle: 'bookmarks' | 'notes' | 'library'
   const [activeTab, setActiveTab] = useState<'bookmarks' | 'notes' | 'library'>(initialTab);
   const [libraryFilter, setLibraryFilter] = useState<'all' | 'reading' | 'want' | 'read'>('all');
 
-  // Local state fallbacks if callbacks not passed
   const [localBookmarks, setLocalBookmarks] = useState<Bookmark[]>(initialBookmarks);
   const [localNotes, setLocalNotes] = useState<Note[]>(initialNotes);
 
   const bookmarks = initialBookmarks.length > 0 ? initialBookmarks : localBookmarks;
   const notes = initialNotes.length > 0 ? initialNotes : localNotes;
 
-  // Filter / Search
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState('All');
 
@@ -63,17 +60,14 @@ export const SavedView: React.FC<SavedViewProps> = ({
   // Note Modal State
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
-  const [noteBookTitle, setNoteBookTitle] = useState('On the Incarnation');
-  const [noteLocation, setNoteLocation] = useState('Chapter 4: The Divine Dilemma');
+  const [noteTitle, setNoteTitle] = useState('');
   const [noteText, setNoteText] = useState('');
-  const [noteTag, setNoteTag] = useState('#Theology');
 
   // Library Management Block Modal State
   const [isAddBookModalOpen, setIsAddBookModalOpen] = useState(false);
   const [selectedBookForLibrary, setSelectedBookForLibrary] = useState<string>(books[0]?.id || '');
-  const [targetStatusForLibrary, setTargetStatusForLibrary] = useState<ReadingStatus>('want-to-read');
+  const [targetStatusForLibrary, setTargetStatusForLibrary] = useState<ReadingStatus>('to_be_read');
 
-  // Copy helper
   const handleCopy = (text: string) => {
     navigator.clipboard?.writeText(text);
     onShowToast('Passage copied to clipboard');
@@ -143,10 +137,9 @@ export const SavedView: React.FC<SavedViewProps> = ({
 
     if (editingNote) {
       const updated = {
-        bookTitle: noteBookTitle,
-        location: noteLocation,
-        text: noteText.trim(),
-        tag: noteTag
+        title: noteTitle || null,
+        content: noteText.trim(),
+        updated_at: new Date().toISOString(),
       };
       if (onUpdateNote) {
         onUpdateNote(editingNote.id, updated);
@@ -159,11 +152,12 @@ export const SavedView: React.FC<SavedViewProps> = ({
     } else {
       const newN: Note = {
         id: `note-${Date.now()}`,
-        bookTitle: noteBookTitle,
-        location: noteLocation,
-        text: noteText.trim(),
-        tag: noteTag,
-        timeAgo: 'Just now'
+        user_id: '',
+        book_id: '',
+        title: noteTitle || null,
+        content: noteText.trim(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       };
       if (onAddNote) {
         onAddNote(newN);
@@ -198,24 +192,16 @@ export const SavedView: React.FC<SavedViewProps> = ({
 
   const filteredNotes = notes.filter((n) => {
     const matchesSearch =
-      n.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.bookTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.tag.toLowerCase().includes(searchQuery.toLowerCase());
+      n.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (n.title ?? '').toLowerCase().includes(searchQuery.toLowerCase());
     return matchesSearch;
   });
 
   const filteredBooks = books.filter((b) => {
-    const matchesFilter =
-      libraryFilter === 'all' ||
-      (libraryFilter === 'reading' && b.readingStatus === 'currently-reading') ||
-      (libraryFilter === 'want' && b.readingStatus === 'want-to-read') ||
-      (libraryFilter === 'read' && b.readingStatus === 'read');
     const matchesSearch =
       b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      b.author.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      b.category.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesFilter && matchesSearch;
+      b.author_name.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesSearch;
   });
 
   return (
@@ -224,7 +210,6 @@ export const SavedView: React.FC<SavedViewProps> = ({
       className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200 selection:bg-theme-accent-light selection:text-theme-accent font-serif antialiased"
     >
       <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex-1 flex flex-col justify-start gap-5">
-        {/* Archival Screen Header */}
         <header id="saved-header" className="select-none">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-theme pb-4">
             <div>
@@ -239,7 +224,6 @@ export const SavedView: React.FC<SavedViewProps> = ({
               </p>
             </div>
 
-            {/* High-visibility Primary Action Button (Explore Catalog removed per request) */}
             <div className="flex items-center gap-2 self-start sm:self-auto pt-1 sm:pt-0">
               {activeTab === 'bookmarks' ? (
                 <button
@@ -264,10 +248,8 @@ export const SavedView: React.FC<SavedViewProps> = ({
                   id="header-new-note-btn"
                   onClick={() => {
                     setEditingNote(null);
-                    setNoteBookTitle('On the Incarnation');
-                    setNoteLocation('Chapter 4: The Divine Dilemma');
+                    setNoteTitle('');
                     setNoteText('');
-                    setNoteTag('#Theology');
                     setIsNoteModalOpen(true);
                   }}
                   className="inline-flex items-center gap-2 px-4 lg:px-5 py-2.5 rounded-xl bg-theme-main text-theme-surface font-serif text-xs sm:text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer shadow-sm border border-theme"
@@ -280,11 +262,8 @@ export const SavedView: React.FC<SavedViewProps> = ({
           </div>
         </header>
 
-        {/* ========================================================================= */}
-        {/* REFINED ARCHIVAL TABS & CLEAN SEARCH                                      */}
-        {/* ========================================================================= */}
+        {/* TABS & SEARCH */}
         <div className="space-y-3 mb-2">
-          {/* Typographic Archive Selector */}
           <div className="flex items-center justify-between border-b border-theme">
             <nav role="tablist" aria-label="Saved Collections" className="flex items-center gap-6 sm:gap-8 lg:gap-10">
               <button
@@ -376,7 +355,6 @@ export const SavedView: React.FC<SavedViewProps> = ({
             </nav>
           </div>
 
-          {/* Dedicated Clean Search Bar with Dynamic Theme Borders & High Contrast */}
           <div className="relative w-full">
             <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[18px] lg:text-[20px] text-theme-muted pointer-events-none">
               search
@@ -390,8 +368,8 @@ export const SavedView: React.FC<SavedViewProps> = ({
                 activeTab === 'bookmarks'
                   ? (isAmharic ? 'ጥቅሶችን፣ ደራሲያንን ወይም ማጣቀሻዎችን ፈልግ...' : 'Search bookmarks by quote text, author, or citation...')
                   : activeTab === 'notes'
-                  ? (isAmharic ? 'ማስታወሻዎችን፣ መጻሕፍትን ወይም መለያዎችን ፈልግ...' : 'Search notes by reflection content, book, or tag...')
-                  : (isAmharic ? 'መጻሕፍትን፣ ደራሲያንን ወይም ክፍሎችን ፈልግ...' : 'Search library by book title, author, or tradition...')
+                  ? (isAmharic ? 'ማስታወሻዎችን ፈልግ...' : 'Search notes...')
+                  : (isAmharic ? 'መጻሕፍትን ወይም ደራሲያንን ፈልግ...' : 'Search library by book title or author...')
               }
               className="w-full bg-theme-surface border border-theme rounded-xl py-2.5 lg:py-3 pl-10 lg:pl-11 pr-9 text-xs sm:text-sm lg:text-base font-serif text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-theme-accent focus:ring-1 focus:ring-theme-accent/20 transition-all shadow-2xs"
             />
@@ -408,12 +386,9 @@ export const SavedView: React.FC<SavedViewProps> = ({
           </div>
         </div>
 
-        {/* ========================================================================= */}
-        {/* VIEW A: BOOKMARKS COLLECTION (Shown when activeTab === 'bookmarks')       */}
-        {/* ========================================================================= */}
+        {/* VIEW A: BOOKMARKS */}
         {activeTab === 'bookmarks' && (
           <section id="bookmarks-view-content" aria-label="Saved Bookmarks" className="space-y-6">
-            {/* Category Filter Pills for Bookmarks */}
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
               {['All', 'Patristics', 'Theology', 'Christology', 'Philosophy', 'Ethics'].map((tag) => (
                 <button
@@ -460,7 +435,6 @@ export const SavedView: React.FC<SavedViewProps> = ({
                     id={`bookmark-${bm.id}`}
                     className="bg-theme-surface rounded-xl border border-theme-subtle p-3.5 sm:p-4 lg:p-6 shadow-2xs hover:border-theme/70 transition-all group"
                   >
-                    {/* Top Row: Left info (Icon + Title + Author) & Right (Category Tag) */}
                     <div className="flex items-center justify-between gap-2.5">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="material-symbols-outlined text-[18px] lg:text-[22px] text-[#b89e6c] dark:text-[#dfba4f] shrink-0">
@@ -480,12 +454,10 @@ export const SavedView: React.FC<SavedViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Quotation text: aligned directly with the book title above it */}
                     <blockquote className="mt-2.5 lg:mt-3.5 pl-[26px] lg:pl-[30px] font-serif text-sm sm:text-[15px] lg:text-lg xl:text-xl text-theme-body italic leading-relaxed lg:leading-8">
                       &ldquo;{bm.quote.replace(/^[“"]|[”"]$/g, '')}&rdquo;
                     </blockquote>
 
-                    {/* Bottom-right Action Icons (Copy, Edit, Delete): delicate, thin outline, muted gray until hovered */}
                     <div className="flex items-center justify-end gap-1 mt-1.5 lg:mt-2 pt-0.5">
                       <button
                         type="button"
@@ -494,7 +466,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
                         title="Copy Citation"
                         aria-label="Copy Citation"
                       >
-                        <span className="material-symbols-outlined material-symbols-thin text-[13px] lg:text-[15px] leading-none">content_copy</span>
+                        <span className="material-symbols-outlined text-[13px] lg:text-[15px] leading-none">content_copy</span>
                       </button>
                       <button
                         type="button"
@@ -510,7 +482,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
                         title="Edit Bookmark"
                         aria-label="Edit Bookmark"
                       >
-                        <span className="material-symbols-outlined material-symbols-thin text-[13px] lg:text-[15px] leading-none">edit</span>
+                        <span className="material-symbols-outlined text-[13px] lg:text-[15px] leading-none">edit</span>
                       </button>
                       <button
                         type="button"
@@ -519,7 +491,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
                         title="Remove Bookmark"
                         aria-label="Remove Bookmark"
                       >
-                        <span className="material-symbols-outlined material-symbols-thin text-[13px] lg:text-[15px] leading-none">delete</span>
+                        <span className="material-symbols-outlined text-[13px] lg:text-[15px] leading-none">delete</span>
                       </button>
                     </div>
                   </article>
@@ -529,9 +501,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
           </section>
         )}
 
-        {/* ========================================================================= */}
-        {/* VIEW B: NOTES COLLECTION (Shown when activeTab === 'notes')                */}
-        {/* ========================================================================= */}
+        {/* VIEW B: NOTES */}
         {activeTab === 'notes' && (
           <section id="notes-view-content" aria-label="Saved Notes" className="space-y-6">
             {filteredNotes.length === 0 ? (
@@ -547,6 +517,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
                   type="button"
                   onClick={() => {
                     setEditingNote(null);
+                    setNoteTitle('');
                     setNoteText('');
                     setIsNoteModalOpen(true);
                   }}
@@ -557,112 +528,91 @@ export const SavedView: React.FC<SavedViewProps> = ({
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredNotes.map((note) => (
-                  <article
-                    key={note.id}
-                    id={`note-${note.id}`}
-                    className="bg-theme-surface rounded-xl border border-theme-subtle p-3.5 sm:p-4 lg:p-6 shadow-2xs hover:border-theme/70 transition-all group"
-                  >
-                    {/* Top Row: Left info (Icon + Title + Location) & Right controls (Time + Tag) */}
-                    <div className="flex items-center justify-between gap-2.5">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="material-symbols-outlined text-[18px] lg:text-[22px] text-[#b89e6c] dark:text-[#dfba4f] shrink-0">
-                          edit_note
-                        </span>
-                        <h3 className="font-serif font-bold text-sm sm:text-base lg:text-lg xl:text-xl text-theme-main leading-snug truncate">
-                          {note.bookTitle}
-                        </h3>
-                        <span className="text-xs text-theme-muted/50 shrink-0">•</span>
-                        <span className="text-xs sm:text-[13px] lg:text-sm xl:text-[15px] text-theme-body font-serif font-medium italic truncate">
-                          {note.location}
-                        </span>
+                {filteredNotes.map((note) => {
+                  const noteDate = new Date(note.created_at).toLocaleDateString(
+                    isAmharic ? 'am-ET' : 'en',
+                    { year: 'numeric', month: 'short', day: 'numeric' }
+                  );
+
+                  return (
+                    <article
+                      key={note.id}
+                      id={`note-${note.id}`}
+                      className="bg-theme-surface rounded-xl border border-theme-subtle p-3.5 sm:p-4 lg:p-6 shadow-2xs hover:border-theme/70 transition-all group"
+                    >
+                      <div className="flex items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="material-symbols-outlined text-[18px] lg:text-[22px] text-[#b89e6c] dark:text-[#dfba4f] shrink-0">
+                            edit_note
+                          </span>
+                          <h3 className="font-serif font-bold text-sm sm:text-base lg:text-lg xl:text-xl text-theme-main leading-snug truncate">
+                            {note.title || (isAmharic ? 'ማስታወሻ' : 'Note')}
+                          </h3>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[11px] lg:text-xs text-theme-muted font-sans hidden sm:inline">
+                            {noteDate}
+                          </span>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-[11px] lg:text-xs text-theme-muted font-sans hidden sm:inline">
-                          {note.timeAgo}
-                        </span>
-                        <span className="text-[10px] lg:text-xs font-sans font-semibold uppercase tracking-wider px-2 lg:px-2.5 py-0.5 rounded bg-theme-subtle border border-theme-subtle text-theme-accent">
-                          {note.tag}
-                        </span>
+                      <div className="mt-2.5 lg:mt-3.5 pl-[26px] lg:pl-[30px] font-serif text-xs sm:text-sm lg:text-base xl:text-[17px] text-theme-body leading-relaxed lg:leading-8">
+                        <p>{note.content}</p>
                       </div>
-                    </div>
 
-                    {/* Reflection Text: aligned directly with book title above it */}
-                    <div className="mt-2.5 lg:mt-3.5 pl-[26px] lg:pl-[30px] font-serif text-xs sm:text-sm lg:text-base xl:text-[17px] text-theme-body leading-relaxed lg:leading-8">
-                      <p>{note.text}</p>
-                    </div>
-
-                    {/* Bottom-right Action Icons (Copy, Edit, Delete): delicate, thin outline, muted gray until hovered */}
-                    <div className="flex items-center justify-end gap-1 mt-1.5 lg:mt-2 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => handleCopy(`${note.text}\n— ${note.bookTitle} (${note.location})`)}
-                        className="p-1 lg:p-1.5 rounded text-theme-muted/40 hover:text-theme-main transition-colors cursor-pointer"
-                        title="Copy Reflection Citation"
-                        aria-label="Copy Reflection Citation"
-                      >
-                        <span className="material-symbols-outlined material-symbols-thin text-[13px] lg:text-[15px] leading-none">content_copy</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingNote(note);
-                          setNoteBookTitle(note.bookTitle);
-                          setNoteLocation(note.location);
-                          setNoteText(note.text);
-                          setNoteTag(note.tag);
-                          setIsNoteModalOpen(true);
-                        }}
-                        className="p-1 lg:p-1.5 rounded text-theme-muted/40 hover:text-theme-main transition-colors cursor-pointer"
-                        title="Edit Note"
-                        aria-label="Edit Note"
-                      >
-                        <span className="material-symbols-outlined material-symbols-thin text-[13px] lg:text-[15px] leading-none">edit</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteN(note.id)}
-                        className="p-1 lg:p-1.5 rounded text-theme-muted/40 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
-                        title="Delete Note"
-                        aria-label="Delete Note"
-                      >
-                        <span className="material-symbols-outlined material-symbols-thin text-[13px] lg:text-[15px] leading-none">delete</span>
-                      </button>
-                    </div>
-                  </article>
-                ))}
+                      <div className="flex items-center justify-end gap-1 mt-1.5 lg:mt-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(`${note.content}\n— ${note.title ?? 'Note'}`)}
+                          className="p-1 lg:p-1.5 rounded text-theme-muted/40 hover:text-theme-main transition-colors cursor-pointer"
+                          title="Copy Reflection Citation"
+                          aria-label="Copy Reflection Citation"
+                        >
+                          <span className="material-symbols-outlined text-[13px] lg:text-[15px] leading-none">content_copy</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingNote(note);
+                            setNoteTitle(note.title ?? '');
+                            setNoteText(note.content);
+                            setIsNoteModalOpen(true);
+                          }}
+                          className="p-1 lg:p-1.5 rounded text-theme-muted/40 hover:text-theme-main transition-colors cursor-pointer"
+                          title="Edit Note"
+                          aria-label="Edit Note"
+                        >
+                          <span className="material-symbols-outlined text-[13px] lg:text-[15px] leading-none">edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteN(note.id)}
+                          className="p-1 lg:p-1.5 rounded text-theme-muted/40 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
+                          title="Delete Note"
+                          aria-label="Delete Note"
+                        >
+                          <span className="material-symbols-outlined text-[13px] lg:text-[15px] leading-none">delete</span>
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             )}
           </section>
         )}
 
-        {/* ========================================================================= */}
-        {/* VIEW C: LIBRARY COLLECTION (Shown when activeTab === 'library')           */}
-        {/* ========================================================================= */}
+        {/* VIEW C: LIBRARY */}
         {activeTab === 'library' && (
           <section id="library-view-content" aria-label="Personal Library" className="space-y-4">
-            {/* Shelf Filter Chips & Inline Quick Actions Row (Reclaiming vertical space) */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
-              {/* Shelf Filter Pills */}
               <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
                 {[
                   { id: 'all', label: isAmharic ? 'ሁሉም' : 'All', count: books.length },
-                  {
-                    id: 'reading',
-                    label: isAmharic ? 'በማንበብ ላይ' : 'Reading',
-                    count: books.filter((b) => b.readingStatus === 'currently-reading').length
-                  },
-                  {
-                    id: 'want',
-                    label: 'TBR',
-                    count: books.filter((b) => b.readingStatus === 'want-to-read').length
-                  },
-                  {
-                    id: 'read',
-                    label: isAmharic ? 'የተነበበ' : 'Read',
-                    count: books.filter((b) => b.readingStatus === 'read').length
-                  }
+                  { id: 'reading', label: isAmharic ? 'በማንበብ ላይ' : 'Reading', count: 0 },
+                  { id: 'want', label: 'TBR', count: 0 },
+                  { id: 'read', label: isAmharic ? 'የተነበረ' : 'Read', count: 0 }
                 ].map((filter) => (
                   <button
                     key={filter.id}
@@ -688,13 +638,12 @@ export const SavedView: React.FC<SavedViewProps> = ({
                 ))}
               </div>
 
-              {/* Inline Actions Row (Compact & Right-Aligned) */}
               <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
                 <button
                   type="button"
                   id="lib-manage-add-tbr-btn"
                   onClick={() => {
-                    setTargetStatusForLibrary('want-to-read');
+                    setTargetStatusForLibrary('to_be_read');
                     if (books.length > 0) setSelectedBookForLibrary(books[0].id);
                     setIsAddBookModalOpen(true);
                   }}
@@ -708,7 +657,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
                   type="button"
                   id="lib-manage-mark-read-btn"
                   onClick={() => {
-                    setTargetStatusForLibrary('read');
+                    setTargetStatusForLibrary('finished');
                     if (books.length > 0) setSelectedBookForLibrary(books[0].id);
                     setIsAddBookModalOpen(true);
                   }}
@@ -743,9 +692,9 @@ export const SavedView: React.FC<SavedViewProps> = ({
                     className="bg-theme-surface rounded-xl border border-theme p-3.5 sm:p-4 shadow-2xs hover:border-theme-accent/60 hover:shadow-xs transition-all cursor-pointer flex gap-3.5 group"
                   >
                     <div className="w-16 h-24 sm:w-20 sm:h-28 rounded-md overflow-hidden bg-theme-subtle border border-black/10 shrink-0 shadow-2xs">
-                      {book.coverImage ? (
+                      {book.cover_url ? (
                         <img
-                          src={book.coverImage}
+                          src={book.cover_url}
                           alt={book.title}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
@@ -758,81 +707,22 @@ export const SavedView: React.FC<SavedViewProps> = ({
 
                     <div className="flex-1 min-w-0 flex flex-col justify-between">
                       <div>
-                        {/* Title - Static status badge removed per request to prevent redundancy */}
                         <h4 className="font-serif font-bold text-sm sm:text-base text-theme-main truncate group-hover:text-theme-accent transition-colors leading-snug">
                           {book.title}
                         </h4>
-                        <p className="text-xs text-theme-muted font-serif truncate mt-0.5 font-medium">{book.author}</p>
+                        <p className="text-xs text-theme-muted font-serif truncate mt-0.5 font-medium">{book.author_name}</p>
                         <p className="text-[11px] text-theme-subtle font-serif mt-0.5">
-                          {book.category} · {book.totalPages || 120} {isAmharic ? 'ገጾች' : 'pages'}
+                          {book.language} · {book.page_count ?? 0} {isAmharic ? 'ገጾች' : 'pages'}
                         </p>
                       </div>
 
-                      {/* Visual Progress Bar (Replacing text-only metric) */}
-                      <div className="w-full mt-2.5 pt-2 border-t border-theme/60 space-y-1.5">
-                        <div className="flex items-center justify-between text-[11px] font-serif">
-                          <span className="text-theme-muted font-medium">
-                            {book.readingStatus === 'currently-reading' ? (
-                              isAmharic ? 'የንባብ ሂደት' : 'Reading Progress'
-                            ) : book.readingStatus === 'read' ? (
-                              <span className="inline-flex items-center gap-1 text-theme-accent font-medium">
-                                <span className="material-symbols-outlined text-[13px]">check_circle</span>
-                                <span>{isAmharic ? 'ተጠናቋል' : 'Completed'}</span>
-                              </span>
-                            ) : (
-                              <span className="text-theme-subtle italic">{isAmharic ? 'የTBR ዝርዝር' : 'TBR Queue'}</span>
-                            )}
-                          </span>
-                          <span className="text-theme-main font-semibold">
-                            {book.readingStatus === 'read' ? '100%' : `${book.progress || 0}%`}
-                          </span>
-                        </div>
-                        <div className="w-full h-1.5 bg-theme-subtle rounded-full overflow-hidden border border-theme/30">
-                          <div
-                            className={`h-full rounded-full transition-all duration-300 ${
-                              book.readingStatus === 'read'
-                                ? 'w-full bg-theme-accent'
-                                : book.readingStatus === 'currently-reading'
-                                ? 'bg-theme-accent'
-                                : 'bg-theme-muted'
-                            }`}
-                            style={{
-                              width:
-                                book.readingStatus === 'read'
-                                  ? '100%'
-                                  : book.readingStatus === 'currently-reading'
-                                  ? `${Math.max(4, Math.min(100, book.progress || 0))}%`
-                                  : '0%'
-                            }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Dropdown status menu - Single source of truth for displaying and changing state */}
-                      <div
-                        className="flex items-center justify-between pt-2 mt-1"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <label htmlFor={`book-status-${book.id}`} className="text-[11px] text-theme-muted font-serif font-medium">
-                          {isAmharic ? 'ሁኔታ:' : 'Shelf:'}
-                        </label>
-
-                        <select
-                          id={`book-status-${book.id}`}
-                          value={book.readingStatus}
-                          onChange={(e) => {
-                            if (onUpdateBookStatus) {
-                              const newStatus = e.target.value as ReadingStatus;
-                              onUpdateBookStatus(book.id, newStatus);
-                              onShowToast(`Updated "${book.title}" to ${newStatus === 'want-to-read' ? 'TBR' : newStatus === 'currently-reading' ? 'Reading' : 'Read'}`);
-                            }
-                          }}
-                          className="text-xs font-serif bg-theme-subtle border border-theme rounded-lg px-2.5 py-1 text-theme-main focus:outline-none focus:border-theme-accent cursor-pointer shadow-2xs font-medium"
-                        >
-                          <option value="currently-reading">{isAmharic ? 'በማንበብ ላይ' : 'Reading'}</option>
-                          <option value="want-to-read">TBR</option>
-                          <option value="read">{isAmharic ? 'የተነበበ' : 'Read'}</option>
-                        </select>
+                      <div className="flex items-center justify-between pt-2 mt-1">
+                        <span className="text-[11px] text-theme-muted font-serif font-medium">
+                          {isAmharic ? 'ሁኔታ:' : 'Status:'}
+                        </span>
+                        <span className="text-xs font-serif text-theme-subtle italic">
+                          {isAmharic ? 'በቅርቡ' : 'Coming soon'}
+                        </span>
                       </div>
                     </div>
                   </article>
@@ -843,9 +733,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
         )}
       </div>
 
-      {/* ========================================================================= */}
-      {/* MODAL: ADD / EDIT BOOKMARK                                                */}
-      {/* ========================================================================= */}
+      {/* MODAL: ADD / EDIT BOOKMARK */}
       {isBookmarkModalOpen && (
         <div
           role="dialog"
@@ -856,7 +744,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
           <form
             onSubmit={handleSaveBookmark}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"
+            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4"
           >
             <div className="flex items-start justify-between border-b border-theme pb-3">
               <div>
@@ -953,9 +841,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: ADD / EDIT NOTE                                                    */}
-      {/* ========================================================================= */}
+      {/* MODAL: ADD / EDIT NOTE */}
       {isNoteModalOpen && (
         <div
           role="dialog"
@@ -966,7 +852,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
           <form
             onSubmit={handleSaveNote}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"
+            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4"
           >
             <div className="flex items-start justify-between border-b border-theme pb-3">
               <div>
@@ -989,44 +875,24 @@ export const SavedView: React.FC<SavedViewProps> = ({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">{isAmharic ? 'መጽሐፍ:' : 'Book / Treatise:'}</label>
+                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">
+                  {isAmharic ? 'ርዕስ:' : 'Title:'}
+                </label>
                 <input
                   type="text"
-                  value={noteBookTitle}
-                  onChange={(e) => setNoteBookTitle(e.target.value)}
-                  placeholder="e.g. On the Incarnation"
-                  className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-theme-accent"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">{isAmharic ? 'ምዕራፍ / ክፍል:' : 'Chapter / Section:'}</label>
-                <input
-                  type="text"
-                  value={noteLocation}
-                  onChange={(e) => setNoteLocation(e.target.value)}
-                  placeholder="e.g. Chapter 4: The Divine Dilemma"
-                  className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-theme-accent"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">{isAmharic ? 'መለያ / ርዕስ:' : 'Tag / Topic:'}</label>
-                <input
-                  type="text"
-                  value={noteTag}
-                  onChange={(e) => setNoteTag(e.target.value)}
-                  placeholder="e.g. #Theology or #Grace"
+                  value={noteTitle}
+                  onChange={(e) => setNoteTitle(e.target.value)}
+                  placeholder={isAmharic ? 'የማስታወሻ ርዕስ' : 'Note title'}
                   className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-theme-accent"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">{isAmharic ? 'የማሰላሰያ ማስታወሻ:' : 'Reflection Note:'}</label>
+                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">
+                  {isAmharic ? 'የማሰላሰያ ማስታወሻ:' : 'Reflection Note:'}
+                </label>
                 <textarea
-                  rows={4}
+                  rows={5}
                   value={noteText}
                   onChange={(e) => setNoteText(e.target.value)}
                   placeholder="Write your theological thoughts or contemplative reflection..."
@@ -1055,11 +921,9 @@ export const SavedView: React.FC<SavedViewProps> = ({
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: LIBRARY MANAGEMENT (ADD TO TBR / SAVE TO LIBRARY)                   */}
-      {/* ========================================================================= */}
+      {/* MODAL: LIBRARY MANAGEMENT */}
       {isAddBookModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -1067,9 +931,9 @@ export const SavedView: React.FC<SavedViewProps> = ({
                 onUpdateBookStatus(selectedBookForLibrary, targetStatusForLibrary);
                 const bookObj = books.find((b) => b.id === selectedBookForLibrary);
                 const statusLabel =
-                  targetStatusForLibrary === 'want-to-read'
+                  targetStatusForLibrary === 'to_be_read'
                     ? (isAmharic ? 'ወደ TBR ተጨምሯል' : 'Added to TBR')
-                    : targetStatusForLibrary === 'read'
+                    : targetStatusForLibrary === 'finished'
                     ? (isAmharic ? 'ወደ ቤተ-መጻሕፍት ተቀምጦ እንደተነበበ ተመዝግቧል' : 'Saved to Library & Marked as Read')
                     : (isAmharic ? 'በማንበብ ላይ ተደርጓል' : 'Set as Reading');
                 onShowToast(`${statusLabel}: "${bookObj?.title || 'Volume'}"`);
@@ -1081,10 +945,10 @@ export const SavedView: React.FC<SavedViewProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-theme">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-theme-accent text-[22px]">
-                  {targetStatusForLibrary === 'want-to-read' ? 'bookmark_add' : 'library_books'}
+                  {targetStatusForLibrary === 'to_be_read' ? 'bookmark_add' : 'library_books'}
                 </span>
                 <h3 className="font-serif text-lg font-bold text-theme-main">
-                  {targetStatusForLibrary === 'want-to-read'
+                  {targetStatusForLibrary === 'to_be_read'
                     ? (isAmharic ? 'መጽሐፉን ወደ TBR ጨምር' : 'Add Volume to TBR')
                     : (isAmharic ? 'መጽሐፉን ወደ ቤተ-መጻሕፍት አስቀምጥ' : 'Save Volume to Library')}
                 </h3>
@@ -1110,7 +974,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
                 >
                   {books.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.title} — {b.author}
+                      {b.title} — {b.author_name}
                     </option>
                   ))}
                 </select>
@@ -1123,9 +987,9 @@ export const SavedView: React.FC<SavedViewProps> = ({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setTargetStatusForLibrary('want-to-read')}
+                    onClick={() => setTargetStatusForLibrary('to_be_read')}
                     className={`py-2 px-3 rounded-lg border text-left font-serif transition-all cursor-pointer flex items-center gap-2 ${
-                      targetStatusForLibrary === 'want-to-read'
+                      targetStatusForLibrary === 'to_be_read'
                         ? 'bg-theme-main text-theme-surface border-theme-main font-semibold shadow-2xs'
                         : 'bg-theme-app text-theme-muted border-theme hover:text-theme-main'
                     }`}
@@ -1136,15 +1000,15 @@ export const SavedView: React.FC<SavedViewProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => setTargetStatusForLibrary('read')}
+                    onClick={() => setTargetStatusForLibrary('finished')}
                     className={`py-2 px-3 rounded-lg border text-left font-serif transition-all cursor-pointer flex items-center gap-2 ${
-                      targetStatusForLibrary === 'read'
+                      targetStatusForLibrary === 'finished'
                         ? 'bg-theme-main text-theme-surface border-theme-main font-semibold shadow-2xs'
                         : 'bg-theme-app text-theme-muted border-theme hover:text-theme-main'
                     }`}
                   >
                     <span className="material-symbols-outlined text-[16px] text-theme-accent">check_circle</span>
-                    <span>{isAmharic ? 'የተነበበ' : 'Read'}</span>
+                    <span>{isAmharic ? 'የተነበረ' : 'Read'}</span>
                   </button>
                 </div>
               </div>

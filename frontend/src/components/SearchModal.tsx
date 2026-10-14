@@ -33,11 +33,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     : questions.slice(0, 3);
 
   const matchedPaths = q
-    ? paths.filter((p) => p.title.toLowerCase().includes(q) || p.description.toLowerCase().includes(q))
+    ? paths.filter((p) => p.title.toLowerCase().includes(q) || (p.description ?? '').toLowerCase().includes(q))
     : paths.slice(0, 3);
 
   const matchedNotes = q
-    ? notes.filter((n) => n.text.toLowerCase().includes(q) || n.bookTitle.toLowerCase().includes(q))
+    ? notes.filter((n) => n.content.toLowerCase().includes(q) || (n.title ?? '').toLowerCase().includes(q))
     : [];
 
   return (
@@ -94,7 +94,8 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                           {qItem.title}
                         </span>
                         <span className="text-[11px] text-theme-muted truncate">
-{qItem.author} · {qItem.repliesCount} {isAmharic ? 'ምላሾች' : 'responses'}                        </span>
+                          {qItem.author} · {qItem.repliesCount} {isAmharic ? 'ምላሾች' : 'responses'}
+                        </span>
                       </div>
                     </div>
                     <span className="material-symbols-outlined text-[16px] text-theme-subtle">chevron_right</span>
@@ -129,11 +130,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                           {p.title}
                         </span>
                         <span className="text-[11px] text-theme-muted truncate">
-                          {p.category} · {p.timeLeft}
+                          {p.topic}{p.difficulty ? ` · ${p.difficulty}` : ''}
                         </span>
                       </div>
                     </div>
-                    <span className="text-[10px] font-semibold text-theme-accent">{p.percentage}%</span>
+                    <span className="material-symbols-outlined text-[16px] text-theme-subtle">chevron_right</span>
                   </button>
                 ))}
               </div>
@@ -161,9 +162,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                     </span>
                     <div className="min-w-0 flex-1">
                       <span className="font-serif text-xs font-semibold text-theme-main block truncate">
-                        {n.bookTitle} · {n.location}
+                        {n.title || (isAmharic ? 'ማስታወሻ' : 'Note')}
                       </span>
-                      <p className="text-[11px] text-theme-muted italic line-clamp-2 mt-0.5">{n.text}</p>
+                      <p className="text-[11px] text-theme-muted italic line-clamp-2 mt-0.5">{n.content}</p>
                     </div>
                   </button>
                 ))}

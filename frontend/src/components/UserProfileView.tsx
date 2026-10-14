@@ -132,7 +132,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                     <span className="material-symbols-outlined text-[17px]">
                       person_add
                     </span>
-                    {t('Follow', 'ተከተል')}
+                    {t('Follow', 'ተከታል')}
                   </button>
                 )}
                 <button
@@ -241,29 +241,34 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-label-md uppercase tracking-wider text-theme-accent">
-                        {review.tradition}
-                      </p>
                       <h3 className="font-serif text-lg font-bold text-theme-main mt-1 group-hover:text-theme-accent transition-colors">
-                        {review.bookTitle}
+                        {review.title || t('Review', 'ግምገማ')}
                       </h3>
-                      <p className="text-xs text-theme-muted">{review.bookAuthor}</p>
+                      <p className="text-xs text-theme-muted line-clamp-2 mt-0.5">
+                        {review.content.slice(0, 120)}
+                        {review.content.length > 120 ? '…' : ''}
+                      </p>
                     </div>
                     <div className="flex items-center gap-1 text-theme-gold text-xs shrink-0">
                       <span className="material-symbols-outlined text-[16px]">star</span>
                       {(review.rating ?? 0).toFixed(1)}
                     </div>
                   </div>
-                  <p className="font-serif italic text-sm text-theme-body mt-4 line-clamp-3">
-                    {review.quote}
-                  </p>
+                  {review.quote && (
+                    <p className="font-serif italic text-sm text-theme-body mt-4 line-clamp-3">
+                      {review.quote}
+                    </p>
+                  )}
                   <div className="flex items-center justify-between mt-4 pt-3 border-t border-theme/60 text-[11px] text-theme-muted">
-                    <span>{review.date}</span>
+                    <span>
+                      {new Date(review.created_at).toLocaleDateString(
+                        isAmharic ? 'am-ET' : 'en',
+                        { year: 'numeric', month: 'short', day: 'numeric' }
+                      )}
+                    </span>
                     <span className="inline-flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[14px]">
-                        forum
-                      </span>
-                      {review.discussionCount} {t('responses', 'ምላሾች')}
+                      <span className="material-symbols-outlined text-[14px]">forum</span>
+                      {t('Review', 'ግምገማ')}
                     </span>
                   </div>
                 </button>

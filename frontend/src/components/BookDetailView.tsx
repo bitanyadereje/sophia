@@ -37,65 +37,39 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
   onShowToast
 }) => {
   const { isAmharic } = useLanguage();
-  // Book save state (bookmark)
   const [isBookSaved, setIsBookSaved] = useState(false);
 
-  // Modals state
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [isWantModalOpen, setIsWantModalOpen] = useState(false);
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
 
-  // Form states: Log Reading
-  const [logPage, setLogPage] = useState<number>(book.currentPage || Math.round(((book.progress || 0) / 100) * (book.totalPages || 100)) || 1);
-  const [logLocation, setLogLocation] = useState<string>(book.currentLocation || '');
-
-  // Form states: Want to Read remarks
+  const [logPage, setLogPage] = useState<number>(1);
+  const [logLocation, setLogLocation] = useState<string>('');
   const [wantRemarks, setWantRemarks] = useState<string>('');
 
-  // Form states: Add Note
   const [noteText, setNoteText] = useState('');
-  const [noteLocation, setNoteLocation] = useState(book.currentLocation || '');
-  const [noteTag, setNoteTag] = useState<'Marginal Annotation' | 'Lectio Divina' | 'Contemplative Insight' | 'Philosophical Note' | 'Study Note'>('Marginal Annotation');
+  const [noteLocation, setNoteLocation] = useState('');
 
-  // Form states: Add Review
   const [revRating, setRevRating] = useState<number>(5);
   const [revBody, setRevBody] = useState('');
-  const [revTradition, setRevTradition] = useState('Patristic');
-  const [revCitation, setRevCitation] = useState(book.codexLabel || '');
+  const [revQuote, setRevQuote] = useState('');
 
-  // Interactive star hover for rating
-  const [hoverRating, setHoverRating] = useState<number>(0);
-
-  // Status flags
-  const isCurrentlyReading = book.readingStatus === 'currently-reading';
-  const isWantToRead = book.readingStatus === 'want-to-read';
-  const isRead = book.readingStatus === 'read';
-
-  // Filter notes specifically for this book
+  // Filter notes for this book by matching book_id
   const bookNotes = useMemo(() => {
-    const bTitle = book.title.toLowerCase();
-    return notes.filter((n) => {
-      const nTitle = n.bookTitle.toLowerCase();
-      return nTitle.includes(bTitle) || bTitle.includes(nTitle);
-    });
-  }, [notes, book.title]);
+    return notes.filter((n) => n.book_id === book.id);
+  }, [notes, book.id]);
 
-  // Filter reviews specifically for this book
+  // Filter reviews for this book by matching book_id
   const bookReviews = useMemo(() => {
-    const bTitle = book.title.toLowerCase();
-    return reviews.filter((r) => {
-      const rTitle = r.bookTitle.toLowerCase();
-      return rTitle.includes(bTitle) || bTitle.includes(rTitle);
-    });
-  }, [reviews, book.title]);
+    return reviews.filter((r) => r.book_id === book.id);
+  }, [reviews, book.id]);
 
-  // Handlers
   const handleSaveReadingLog = (e: React.FormEvent) => {
     e.preventDefault();
     const pageNum = Number(logPage) || 0;
     if (onUpdateBookStatus) {
-      onUpdateBookStatus(book.id, 'currently-reading', book.userRating, pageNum, logLocation);
+      onUpdateBookStatus(book.id, 'reading', undefined, pageNum, logLocation);
     }
     setIsLogModalOpen(false);
     onShowToast(`Reading progress updated: page ${pageNum}${logLocation ? ` in ${logLocation}` : ''}`);
@@ -104,25 +78,10 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
   const handleSaveWantToRead = (e: React.FormEvent) => {
     e.preventDefault();
     if (onUpdateBookStatus) {
-      onUpdateBookStatus(book.id, 'want-to-read', book.userRating, 0);
+      onUpdateBookStatus(book.id, 'to_be_read');
     }
-
-    if (wantRemarks.trim() && onAddNote) {
-      const newNote: Note = {
-        id: `note-${Date.now()}`,
-        bookTitle: book.title,
-        timeAgo: 'Just now',
-        text: wantRemarks.trim(),
-        tag: 'Reading Intention',
-        location: 'Want to Read Shelf',
-        accentColor: '#693a30'
-      };
-      onAddNote(newNote);
-    }
-
     setIsWantModalOpen(false);
-    setWantRemarks('');
-    onShowToast(`Saved "${book.title}" to your Want to Read shelf with remarks`);
+    onShowToast(`Saved "${book.title}" to your Want to Read shelf`);
   };
 
   const handleCreateNote = (e: React.FormEvent) => {
@@ -132,17 +91,18 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
     if (onAddNote) {
       const newNote: Note = {
         id: `note-${Date.now()}`,
-        bookTitle: book.title,
-        timeAgo: 'Just now',
-        text: noteText.trim(),
-        tag: noteTag,
-        location: noteLocation.trim() || book.currentLocation || 'General Note',
-        accentColor: '#466550'
+        user_id: (currentUser as any)?.id || '',
+        book_id: book.id,
+        title: noteLocation.trim() || null,
+        content: noteText.trim(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       };
       onAddNote(newNote);
     }
 
     setNoteText('');
+    setNoteLocation('');
     setIsNoteModalOpen(false);
     onShowToast(`Note added to ${book.title}`);
   };
@@ -154,48 +114,48 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
     if (onAddReview) {
       const newReview: Review = {
         id: `rev-${Date.now()}`,
-        bookTitle: book.title,
-        bookAuthor: book.author,
-        tradition: revTradition,
+        user_id: (currentUser as any)?.id || '',
+        book_id: book.id,
+        title: null,
+        content: revBody.trim(),
         rating: revRating,
-        reviewerName: currentUser?.name || 'Scholar Inquirer',
-        reviewerAffiliation: currentUser?.location || 'Oxford Fellowship',
-        reviewerAvatar:
-          currentUser?.avatar ||
-          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
-        date: 'Today',
-        quote: revBody.trim(),
-        citation: revCitation.trim() || 'Annotated Edition',
-        peerReviewed: false,
-        discussionCount: 0,
-        bookCover: book.coverImage
+        quote: revQuote.trim() || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       };
       onAddReview(newReview);
     }
 
     setRevBody('');
+    setRevQuote('');
     setIsReviewModalOpen(false);
-    onShowToast(`Scholarly appraisal published for ${book.title}`);
+    onShowToast(`Review published for ${book.title}`);
   };
 
-  const handleRateBook = (stars: number) => {
+  const handleStartReading = () => {
     if (onUpdateBookStatus) {
-      onUpdateBookStatus(book.id, 'read', stars);
+      onUpdateBookStatus(book.id, 'reading', undefined, 1);
     }
-    onShowToast(`Rated ${book.title} ${stars} out of 5 stars`);
+    onShowToast(`Started reading "${book.title}"`);
+  };
+
+  const handleMarkFinished = () => {
+    if (onUpdateBookStatus) {
+      onUpdateBookStatus(book.id, 'finished');
+    }
+    onShowToast(`Congratulations! Marked "${book.title}" as completed.`);
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
-      {/* Top Sub-Bar with Breadcrumb Navigation */}
+      {/* Top Sub-Bar */}
       <div className="sticky top-16 z-30 bg-theme-surface border-b border-theme shadow-xs">
         <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2.5 min-w-0">
             <button
               onClick={() => onNavigate('colloquium')}
               className="min-w-[34px] min-h-[34px] flex items-center justify-center rounded-full bg-theme-subtle hover:bg-theme-muted text-theme-main transition-colors cursor-pointer"
-              aria-label={isAmharic ? 'ወደ የመጽሐፍ ውይይቶች ማውጫ ተመለስ' : 'Return to Book Discussions Directory'}
-              title={isAmharic ? 'ወደ የመጽሐፍ ውይይቶች ማውጫ ተመለስ' : 'Return to Book Discussions Directory'}
+              aria-label={isAmharic ? 'ተመለስ' : 'Back'}
             >
               <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             </button>
@@ -213,12 +173,12 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
             <button
               onClick={() => {
                 setIsBookSaved(!isBookSaved);
-                onShowToast(isBookSaved ? (isAmharic ? 'ከተቀመጡ ጥራዞች ተሰርዟል' : 'Removed from saved volumes') : (isAmharic ? 'ጥራዙ በምልክቶች ተቀምጧል' : 'Volume saved to bookmarks'));
+                onShowToast(isBookSaved ? (isAmharic ? 'ከተቀመጡ ተሰርዟል' : 'Removed from saved') : (isAmharic ? 'ጥራዙ ተቀምጧል' : 'Volume saved'));
               }}
               className={`min-w-[34px] min-h-[34px] flex items-center justify-center rounded-full transition-colors cursor-pointer ${
                 isBookSaved ? 'text-theme-gold bg-theme-gold/10' : 'text-theme-muted hover:bg-theme-subtle'
               }`}
-              aria-label={isAmharic ? 'ይህን ጥራዝ ምልክት አድርግ' : 'Bookmark this volume'}
+              aria-label={isAmharic ? 'ጥራዝ አስቀምጥ' : 'Bookmark this volume'}
             >
               <span
                 className="material-symbols-outlined text-[18px]"
@@ -240,53 +200,35 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
       </div>
 
       <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6">
-        {/* ========================================================================= */}
-        {/* 1. BOOK OVERVIEW CARD                                                     */}
-        {/* ========================================================================= */}
+        {/* 1. BOOK OVERVIEW CARD */}
         <section className="bg-theme-surface rounded-xl border border-theme p-6 sm:p-8 shadow-xs relative overflow-hidden">
           <div className="flex flex-col sm:flex-row gap-6 sm:gap-7 items-start">
-            {/* Cover image */}
+            {/* Cover */}
             <div className="w-24 h-34 sm:w-28 sm:h-40 rounded-lg overflow-hidden flex-shrink-0 bg-theme-subtle border border-theme shadow-md relative mx-auto sm:mx-0">
-              <img
-                src={book.coverImage}
-                alt={book.title}
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
-              {book.codexLabel && (
-                <span className="absolute bottom-0 inset-x-0 text-white text-[10px] text-center font-serif py-0.5 tracking-wider truncate drop-shadow-xs px-1 z-10">
-                  {book.codexLabel}
-                </span>
+              {book.cover_url ? (
+                <img
+                  src={book.cover_url}
+                  alt={book.title}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-theme-subtle">
+                  <span className="material-symbols-outlined text-3xl">menu_book</span>
+                </div>
               )}
             </div>
 
-            {/* Book metadata & summary */}
+            {/* Book metadata */}
             <div className="flex flex-col flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2 mb-2">
                 <span className="text-[10px] uppercase font-bold tracking-wider text-theme-accent bg-theme-accent-light px-2 py-0.5 rounded border border-theme whitespace-nowrap">
-                  {book.categoryTag || book.category || 'Patristic'}
+                  {book.language}
                 </span>
-                <span className="text-xs text-theme-muted whitespace-nowrap">{book.era}</span>
-
-                {/* Status Badges */}
-                {isCurrentlyReading && (
+                {book.verification_status === 'verified' && (
                   <span className="text-[10px] uppercase font-bold tracking-wider text-theme-accent bg-theme-accent/10 px-2 py-0.5 rounded border border-theme-accent/20 whitespace-nowrap flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-theme-accent animate-pulse" />
-                    <span>{isAmharic ? `በማንበብ ላይ · ${book.progress || 0}%` : `Actively Reading · ${book.progress || 0}%`}</span>
-                  </span>
-                )}
-
-                {isWantToRead && (
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 whitespace-nowrap">
-                    {isAmharic ? 'በTBR መደርደሪያ ላይ' : 'In Want to Read Shelf'}
-                  </span>
-                )}
-
-                {isRead && (
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-theme-accent bg-theme-accent-light px-2 py-0.5 rounded border border-theme whitespace-nowrap flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[13px]">check_circle</span>
-                    <span>{isAmharic ? 'የተጠናቀቀ ንባብ' : 'Completed Reading'}</span>
+                    <span className="material-symbols-outlined text-[12px]">verified</span>
+                    <span>{isAmharic ? 'የተረጋገጠ' : 'Verified'}</span>
                   </span>
                 )}
               </div>
@@ -294,185 +236,83 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
               <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main leading-tight">
                 {book.title}
               </h1>
-              {book.originalTitle && (
-                <p className="text-xs sm:text-sm font-serif italic text-theme-muted mt-1">
-                  «{book.originalTitle}»
-                </p>
-              )}
+
               <p className="text-sm text-theme-body font-medium mt-1.5">
-                {isAmharic ? 'ደራሲ፡ ' : 'By '}<span className="text-theme-main font-semibold">{book.author}</span>
-                {book.authorEra && <span className="text-theme-muted font-normal text-xs"> ({book.authorEra})</span>}
+                {isAmharic ? 'ደራሲ፡ ' : 'By '}
+                <span className="text-theme-main font-semibold">{book.author_name}</span>
               </p>
 
-              {book.summary && (
+              {book.description && (
                 <p className="text-sm text-theme-body mt-4 leading-relaxed max-w-[70ch]">
-                  {book.summary}
+                  {book.description}
                 </p>
               )}
 
-              {/* Reading Progress Indicator if actively reading */}
-              {isCurrentlyReading && (
-                <div className="mt-5 pt-4 border-t border-theme/60 flex flex-col gap-2">
-                  <div className="flex items-center justify-between text-xs text-theme-muted">
-                    <span className="flex items-center gap-1.5 text-theme-main font-medium">
-                      <span className="material-symbols-outlined text-[16px] text-theme-accent">bookmark</span>
-                      <span>{isAmharic ? 'አሁን፡ ' : 'Current: '}{book.currentLocation || (isAmharic ? 'በሂደት ላይ' : 'In progress')}</span>
-                      {book.currentPage && <span>· {isAmharic ? `ገጽ ${book.currentPage} / ${book.totalPages || 100}` : `Page ${book.currentPage} / ${book.totalPages || 100}`}</span>}
-                    </span>
-                    <span className="font-bold text-theme-main">
-                      {book.progress || 0}% {isAmharic ? 'ተጠናቋል' : 'complete'}
-                    </span>
-                  </div>
-                  <div className="w-full h-2 bg-theme-subtle rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-theme-accent rounded-full transition-all duration-300"
-                      style={{ width: `${book.progress || 0}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Scholar Stats & Details */}
+              {/* Stats row */}
               <div className="mt-5 pt-4 border-t border-theme flex flex-wrap items-center gap-4 text-xs text-theme-muted">
-                <span className="flex items-center gap-1.5 text-theme-gold">
-                  <span className="material-symbols-outlined text-[15px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                    star
-                  </span>
-                  <strong className="text-theme-main font-semibold">{book.rating || 4.8}</strong> {isAmharic ? 'የካታሎግ ደረጃ' : 'catalog rating'}
-                </span>
-                <span>·</span>
                 <span className="flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-[16px] text-theme-accent">edit_note</span>
-                  <strong className="text-theme-main font-semibold">{bookNotes.length}</strong> {isAmharic ? 'የግል ማስታወሻዎች' : 'personal notes'}
+                  <strong className="text-theme-main font-semibold">{bookNotes.length}</strong>{' '}
+                  {isAmharic ? 'የግል ማስታወሻዎች' : 'personal notes'}
                 </span>
                 <span>·</span>
                 <span className="flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-[16px] text-theme-accent">rate_review</span>
-                  <strong className="text-theme-main font-semibold">{bookReviews.length}</strong> {isAmharic ? 'ግምገማዎች' : 'reviews'}
+                  <strong className="text-theme-main font-semibold">{bookReviews.length}</strong>{' '}
+                  {isAmharic ? 'ግምገማዎች' : 'reviews'}
                 </span>
-                {book.totalPages && (
+                {book.page_count != null && (
                   <>
                     <span>·</span>
-                    <span>{book.totalPages} {isAmharic ? 'ገጾች' : 'pages'}</span>
-                  </>
-                )}
-                {book.translator && (
-                  <>
-                    <span>·</span>
-                    <span className="truncate max-w-[220px]" title={book.translator}>
-                      Tr. {book.translator}
-                    </span>
+                    <span>{book.page_count} {isAmharic ? 'ገጾች' : 'pages'}</span>
                   </>
                 )}
               </div>
 
-              {/* ========================================================================= */}
-              {/* DYNAMIC ACTION BUTTONS (Based on Reading Status)                          */}
-              {/* ========================================================================= */}
+              {/* Action buttons */}
               <div className="mt-5 pt-4 border-t border-theme flex flex-wrap items-center gap-3">
-                {/* 1. If currently reading: Show Log Reading button */}
-                {isCurrentlyReading && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setIsLogModalOpen(true)}
-                      className="h-10 px-4 py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 hover:bg-stone-700 dark:hover:bg-stone-600 text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer shadow-xs"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">menu_book</span>
-                      <span>{isAmharic ? 'ንባብ መዝግብ' : 'Log Reading'}</span>
-                    </button>
+                <button
+                  type="button"
+                  onClick={() => setIsWantModalOpen(true)}
+                  className="h-10 px-4 py-2 rounded-lg bg-theme-surface border-2 border-theme-accent text-theme-accent hover:bg-theme-accent hover:text-white text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <span className="material-symbols-outlined text-[18px]">playlist_add</span>
+                  <span>{isAmharic ? 'ወደ TBR አስቀምጥ' : 'Save to Want to Read'}</span>
+                </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onUpdateBookStatus) {
-                          onUpdateBookStatus(book.id, 'read', book.userRating || 5);
-                        }
-                        onShowToast(`Congratulations! Marked "${book.title}" as completed.`);
-                      }}
-                      className="h-10 px-3.5 py-2 rounded-lg bg-theme-surface border border-theme text-theme-main hover:bg-theme-subtle text-xs sm:text-sm font-serif font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-                    >
-                      <span className="material-symbols-outlined text-[17px] text-theme-accent">check_circle</span>
-                      <span>{isAmharic ? 'እንደተጠናቀቀ ምልክት አድርግ' : 'Mark as Finished'}</span>
-                    </button>
-                  </>
-                )}
+                <button
+                  type="button"
+                  onClick={handleStartReading}
+                  className="h-10 px-3.5 py-2 rounded-lg bg-theme-surface border border-theme text-theme-main hover:bg-theme-subtle text-xs sm:text-sm font-serif font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <span className="material-symbols-outlined text-[17px] text-theme-accent">play_arrow</span>
+                  <span>{isAmharic ? 'ንባብ ጀምር' : 'Start Reading'}</span>
+                </button>
 
-                {/* 2. If NOT currently reading: Show Save to Library as Want to Read with remarks */}
-                {!isCurrentlyReading && !isRead && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setIsWantModalOpen(true)}
-                      className="h-10 px-4 py-2 rounded-lg bg-theme-surface border-2 border-theme-accent text-theme-accent hover:bg-theme-accent hover:text-white text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer shadow-xs"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">playlist_add</span>
-                      <span>{isAmharic ? 'ወደ TBR አስቀምጥ' : 'Save to Library as Want to Read'}</span>
-                    </button>
+                <button
+                  type="button"
+                  onClick={() => setIsLogModalOpen(true)}
+                  className="h-10 px-4 py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 hover:bg-stone-700 dark:hover:bg-stone-600 text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <span className="material-symbols-outlined text-[18px]">menu_book</span>
+                  <span>{isAmharic ? 'ንባብ መዝግብ' : 'Log Reading'}</span>
+                </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onUpdateBookStatus) {
-                          onUpdateBookStatus(book.id, 'currently-reading', book.userRating, 1);
-                        }
-                        onShowToast(`Started reading "${book.title}"`);
-                      }}
-                      className="h-10 px-3.5 py-2 rounded-lg bg-theme-surface border border-theme text-theme-main hover:bg-theme-subtle text-xs sm:text-sm font-serif font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-                    >
-                      <span className="material-symbols-outlined text-[17px] text-theme-accent">play_arrow</span>
-                      <span>{isAmharic ? 'ንባብ ጀምር' : 'Start Reading'}</span>
-                    </button>
-                  </>
-                )}
-
-                {/* 3. Rating if finished reading */}
-                {isRead && (
-                  <div className="flex flex-wrap items-center gap-3 bg-theme-subtle/70 px-3.5 py-2 rounded-xl border border-theme">
-                    <span className="text-xs font-serif font-semibold text-theme-main flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[16px] text-theme-accent">task_alt</span>
-                      <span>{isAmharic ? 'የእርስዎ ደረጃ:' : 'Your Rating:'}</span>
-                    </span>
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          key={star}
-                          type="button"
-                          onMouseEnter={() => setHoverRating(star)}
-                          onMouseLeave={() => setHoverRating(0)}
-                          onClick={() => handleRateBook(star)}
-                          className="p-0.5 text-theme-gold hover:scale-125 transition-transform cursor-pointer"
-                          title={`Rate ${star} star${star > 1 ? 's' : ''}`}
-                          aria-label={`Rate ${star} star${star > 1 ? 's' : ''}`}
-                        >
-                          <span
-                            className="material-symbols-outlined text-[22px]"
-                            style={{
-                              fontVariationSettings:
-                                (hoverRating || book.userRating || 0) >= star ? "'FILL' 1" : "'FILL' 0"
-                            }}
-                          >
-                            star
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    <span className="text-xs font-serif text-theme-muted ml-1">
-                      {book.userRating ? `(${book.userRating}/5)` : (isAmharic ? '(ደረጃ ይስጡ)' : '(Tap to rate)')}
-                    </span>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={handleMarkFinished}
+                  className="h-10 px-3.5 py-2 rounded-lg bg-theme-surface border border-theme text-theme-main hover:bg-theme-subtle text-xs sm:text-sm font-serif font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <span className="material-symbols-outlined text-[17px] text-theme-accent">check_circle</span>
+                  <span>{isAmharic ? 'እንደተጠናቀቀ ምልክት አድርግ' : 'Mark as Finished'}</span>
+                </button>
               </div>
             </div>
           </div>
         </section>
 
-        {/* ========================================================================= */}
-        {/* 2. SEMINAR & DISCUSSION THREAD LINK ("enter seminal link is enough")      */}
-        {/* ========================================================================= */}
+        {/* 2. SEMINAR LINK */}
         <section
-          id="volume-seminar-link"
-          aria-label={isAmharic ? 'የመጽሐፍ ውይይት እና ሴሚናር' : 'Discussion Thread and Seminar'}
           onClick={() => {
             if (onOpenSeminar) {
               onOpenSeminar(book.id);
@@ -499,8 +339,8 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
                 {book.title} {isAmharic ? 'የውይይት መድረክ' : 'Discussion Thread'}
               </h2>
               <p className="text-xs sm:text-sm text-theme-muted mt-0.5 leading-relaxed max-w-xl">
-                {isAmharic 
-                  ? 'ስለዚህ ጥራዝ ከምሁራን እና አንባቢያን ጋር በጥልቀት ለመወያየት ወደ ሴሚናር ክፍሉ ይግቡ።' 
+                {isAmharic
+                  ? 'ስለዚህ ጥራዝ ከምሁራን እና አንባቢያን ጋር በጥልቀት ለመወያየት ወደ ሴሚናር ክፍሉ ይግቡ።'
                   : 'Enter the formal colloquium seminar and scholarly discussion thread for this treatise with monastic fellows and university scholars.'}
               </p>
             </div>
@@ -508,7 +348,6 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
 
           <button
             type="button"
-            id="enter-seminar-room-btn"
             onClick={(e) => {
               e.stopPropagation();
               if (onOpenSeminar) {
@@ -524,14 +363,8 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
           </button>
         </section>
 
-        {/* ========================================================================= */}
-        {/* 3. BOOK NOTES (Specifically grouped under this book)                      */}
-        {/* ========================================================================= */}
-        <section
-          id="volume-notes-section"
-          aria-label="Book Notes"
-          className="bg-theme-surface rounded-xl border border-theme p-5 sm:p-6 shadow-xs space-y-4"
-        >
+        {/* 3. NOTES */}
+        <section className="bg-theme-surface rounded-xl border border-theme p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-theme">
             <div>
               <div className="flex items-center gap-2.5">
@@ -543,9 +376,9 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-theme-muted mt-0.5 font-serif">
-                {isAmharic 
-                  ? 'የግል ማስታወሻዎች፣ የምዕራፍ ጥቅሶች እና የማሰላሰያ ሃሳቦች' 
-                  : 'Personal reading notes, chapter citations, and reflections specifically grouped under this volume'}
+                {isAmharic
+                  ? 'የግል ማስታወሻዎች፣ የምዕራፍ ጥቅሶች እና የማሰላሰያ ሃሳቦች'
+                  : 'Personal reading notes, chapter citations, and reflections'}
               </p>
             </div>
 
@@ -559,15 +392,11 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
             </button>
           </div>
 
-          {/* Notes List */}
           {bookNotes.length === 0 ? (
             <div className="text-center py-10 px-4 bg-theme-subtle/50 rounded-xl border border-theme/60">
               <span className="material-symbols-outlined text-4xl text-theme-subtle mb-2">edit_note</span>
               <p className="font-serif font-bold text-theme-main text-sm">
                 {isAmharic ? 'ለዚህ ጥራዝ የተመዘገበ ማስታወሻ የለም' : 'No notes recorded for this volume yet'}
-              </p>
-              <p className="text-xs text-theme-muted mt-1 max-w-sm mx-auto font-serif">
-                {isAmharic ? `የ${book.title} የኅዳግ ማስታወሻዎችን ወይም ማሰላሰያዎችን እዚህ ይመዝግቡ።` : `Capture your marginal annotations, favorite passages, or study notes for ${book.title}.`}
               </p>
               <button
                 type="button"
@@ -580,41 +409,36 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3">
-              {bookNotes.map((note) => (
-                <article
-                  key={note.id}
-                  className="p-4 rounded-xl bg-theme-subtle/40 border border-theme space-y-2 hover:border-theme-accent/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-theme-main font-serif flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[15px] text-theme-accent">bookmark</span>
-                        <span>{note.location || 'General'}</span>
-                      </span>
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-theme-accent bg-theme-accent-light px-2 py-0.2 rounded border border-theme">
-                        {note.tag}
-                      </span>
-                    </div>
-                    <span className="text-theme-muted text-[11px] font-sans">{note.timeAgo}</span>
-                  </div>
+              {bookNotes.map((note) => {
+                const noteDate = new Date(note.created_at).toLocaleDateString(
+                  isAmharic ? 'am-ET' : 'en',
+                  { year: 'numeric', month: 'short', day: 'numeric' }
+                );
 
-                  <p className="font-serif text-xs sm:text-sm text-theme-body leading-relaxed pl-2 border-l-2 border-theme-accent/50 italic">
-                    {note.text}
-                  </p>
-                </article>
-              ))}
+                return (
+                  <article
+                    key={note.id}
+                    className="p-4 rounded-xl bg-theme-subtle/40 border border-theme space-y-2 hover:border-theme-accent/40 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                      <span className="font-semibold text-theme-main font-serif">
+                        {note.title || (isAmharic ? 'ማስታወሻ' : 'Note')}
+                      </span>
+                      <span className="text-theme-muted text-[11px] font-sans">{noteDate}</span>
+                    </div>
+
+                    <p className="font-serif text-xs sm:text-sm text-theme-body leading-relaxed pl-2 border-l-2 border-theme-accent/50 italic">
+                      {note.content}
+                    </p>
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>
 
-        {/* ========================================================================= */}
-        {/* 4. REVIEWS & SCHOLARLY APPRAISALS (View & Add Reviews)                    */}
-        {/* ========================================================================= */}
-        <section
-          id="volume-reviews-section"
-          aria-label="Reviews and Scholarly Appraisals"
-          className="bg-theme-surface rounded-xl border border-theme p-5 sm:p-6 shadow-xs space-y-4"
-        >
+        {/* 4. REVIEWS */}
+        <section className="bg-theme-surface rounded-xl border border-theme p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-theme">
             <div>
               <div className="flex items-center gap-2.5">
@@ -626,9 +450,9 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-theme-muted mt-0.5 font-serif">
-                {isAmharic 
-                  ? 'የአቻ አንባቢዎች መጽሐፍ ዳሰሳዎች እና ሂሶች' 
-                  : 'Peer assessments, textual evaluations, and critical appraisals of this edition'}
+                {isAmharic
+                  ? 'የአቻ አንባቢዎች መጽሐፍ ዳሰሳዎች እና ሂሶች'
+                  : 'Peer assessments and reader reviews'}
               </p>
             </div>
 
@@ -642,15 +466,11 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
             </button>
           </div>
 
-          {/* Reviews List */}
           {bookReviews.length === 0 ? (
             <div className="text-center py-10 px-4 bg-theme-subtle/50 rounded-xl border border-theme/60">
               <span className="material-symbols-outlined text-4xl text-theme-subtle mb-2">rate_review</span>
               <p className="font-serif font-bold text-theme-main text-sm">
                 {isAmharic ? 'በዚህ መጽሐፍ ላይ እስካሁን ምንም መጽሐፍ ዳሰሳ የለም' : 'No reviews on this volume yet'}
-              </p>
-              <p className="text-xs text-theme-muted mt-1 max-w-sm mx-auto font-serif">
-                {isAmharic ? `ስለ ${book.title} የመጀመሪያውን መጽሐፍ ዳሰሳ ወይም ማሰላሰያ ይጻፉ።` : `Be the first to leave a scholarly appraisal or reader reflection on ${book.title}.`}
               </p>
               <button
                 type="button"
@@ -663,81 +483,67 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
             </div>
           ) : (
             <div className="divide-y divide-theme">
-              {bookReviews.map((rev) => (
-                <article key={rev.id} className="py-4 first:pt-0 last:pb-0 space-y-2.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2.5">
-                      <img
-                        src={rev.reviewerAvatar}
-                        alt={rev.reviewerName}
-                        className="w-8 h-8 rounded-full object-cover border border-theme bg-theme-subtle"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-serif text-xs font-bold text-theme-main">
-                            {rev.reviewerName}
-                          </span>
-                          {rev.peerReviewed && (
-                            <span className="text-[9px] uppercase font-bold tracking-wider text-theme-accent bg-theme-accent/10 px-1.5 py-0.2 rounded border border-theme-accent/20">
-                              {isAmharic ? 'በአቻ የተገመገመ' : 'Peer Reviewed'}
-                            </span>
-                          )}
+              {bookReviews.map((rev) => {
+                const revDate = new Date(rev.created_at).toLocaleDateString(
+                  isAmharic ? 'am-ET' : 'en',
+                  { year: 'numeric', month: 'short', day: 'numeric' }
+                );
+
+                return (
+                  <article key={rev.id} className="py-4 first:pt-0 last:pb-0 space-y-2.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full bg-theme-accent text-white flex items-center justify-center font-serif font-bold text-xs">
+                          R
                         </div>
-                        <p className="text-[11px] text-theme-muted font-serif">
-                          {rev.reviewerAffiliation} · {rev.date}
-                        </p>
+                        <div>
+                          <span className="font-serif text-xs font-bold text-theme-main block">
+                            {isAmharic ? 'አንባቢ' : 'Reader'}
+                          </span>
+                          <p className="text-[11px] text-theme-muted font-serif">{revDate}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-0.5 text-theme-gold shrink-0">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <span
+                            key={star}
+                            className="material-symbols-outlined text-[15px]"
+                            style={{ fontVariationSettings: rev.rating >= star ? "'FILL' 1" : "'FILL' 0" }}
+                          >
+                            star
+                          </span>
+                        ))}
                       </div>
                     </div>
 
-                    {/* Star Rating */}
-                    <div className="flex items-center gap-0.5 text-theme-gold shrink-0">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <span
-                          key={star}
-                          className="material-symbols-outlined text-[15px]"
-                          style={{
-                            fontVariationSettings: rev.rating >= star ? "'FILL' 1" : "'FILL' 0"
-                          }}
-                        >
-                          star
-                        </span>
-                      ))}
-                    </div>
-                  </div>
+                    {rev.title && (
+                      <h4 className="font-serif text-sm font-bold text-theme-main">{rev.title}</h4>
+                    )}
 
-                  {/* Review Body */}
-                  <blockquote className="font-serif text-xs sm:text-sm text-theme-body leading-relaxed pl-3 border-l-2 border-theme-accent italic">
-                    {rev.quote}
-                  </blockquote>
+                    <blockquote className="font-serif text-xs sm:text-sm text-theme-body leading-relaxed pl-3 border-l-2 border-theme-accent">
+                      {rev.content}
+                    </blockquote>
 
-                  {/* Citation / Meta */}
-                  <div className="flex items-center justify-between text-[11px] text-theme-muted font-serif pt-0.5">
-                    <span className="flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px] text-theme-accent">menu_book</span>
-                      <span>{rev.citation}</span>
-                    </span>
-                    <span className="text-[10px] uppercase font-bold tracking-wider text-theme-accent bg-theme-subtle px-2 py-0.5 rounded border border-theme">
-                      {rev.tradition}
-                    </span>
-                  </div>
-                </article>
-              ))}
+                    {rev.quote && (
+                      <p className="text-[11px] text-theme-muted font-serif italic pl-3">
+                        &ldquo;{rev.quote}&rdquo;
+                      </p>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 5. MODALS                                                                 */}
-      {/* ========================================================================= */}
-
-      {/* Modal A: Log Reading Progress */}
+      {/* MODAL A: Log Reading */}
       {isLogModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
           onClick={() => setIsLogModalOpen(false)}
         >
           <div
@@ -766,12 +572,12 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
             <form onSubmit={handleSaveReadingLog} className="flex flex-col gap-3.5 text-xs">
               <div className="flex flex-col gap-1">
                 <label className="font-semibold text-theme-main font-serif">
-                  {isAmharic ? `የተነበበው ገጽ (ከ${book.totalPages || 100} ገጾች ውስጥ)` : `Current Page Read (out of ${book.totalPages || 100} pages)`}
+                  {isAmharic ? 'የተነበበው ገጽ' : 'Current Page Read'}
                 </label>
                 <input
                   type="number"
                   min="1"
-                  max={book.totalPages || 2000}
+                  max={book.page_count ?? 2000}
                   value={logPage}
                   onChange={(e) => setLogPage(Number(e.target.value))}
                   required
@@ -785,7 +591,7 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder={isAmharic ? 'ለምሳሌ፡ መጽሐፍ ፰፡ በሚላን የአትክልት ስፍራ' : 'e.g. Book VIII: The Garden at Milan'}
+                  placeholder={isAmharic ? 'ለምሳሌ፡ ምዕራፍ ፬' : 'e.g. Chapter 4'}
                   value={logLocation}
                   onChange={(e) => setLogLocation(e.target.value)}
                   className="bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-theme-main text-sm focus:outline-hidden focus:border-theme-accent"
@@ -813,12 +619,12 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
         </div>
       )}
 
-      {/* Modal B: Save to Want to Read with Specific Remarks */}
+      {/* MODAL B: Want to Read */}
       {isWantModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
           onClick={() => setIsWantModalOpen(false)}
         >
           <div
@@ -831,7 +637,7 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
                   {isAmharic ? 'የቤተ-መጻሕፍት መደርደሪያ' : 'Library Shelf'}
                 </span>
                 <h3 className="font-serif text-base sm:text-lg font-bold text-theme-main">
-                  {isAmharic ? 'ወደ TBR ዝርዝር አስቀምጥ' : 'Save to Want to Read List'}
+                  {isAmharic ? 'ወደ TBR ዝርዝር አስቀምጥ' : 'Save to Want to Read'}
                 </h3>
               </div>
               <button
@@ -846,18 +652,18 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
 
             <form onSubmit={handleSaveWantToRead} className="flex flex-col gap-3.5 text-xs">
               <p className="text-theme-muted font-serif leading-relaxed">
-                {isAmharic 
-                  ? `«${book.title}»ን ወደ ንባብ ዕቅድዎ ከማስታወሻዎች እና ግቦች ጋር ያክሉ።`
-                  : `Add ${book.title} to your personal library shelf with any specific study notes, recommendations, or reading goals.`}
+                {isAmharic
+                  ? `«${book.title}»ን ወደ ንባብ ዕቅድዎ ያክሉ።`
+                  : `Add "${book.title}" to your personal library shelf.`}
               </p>
 
               <div className="flex flex-col gap-1">
                 <label className="font-semibold text-theme-main font-serif">
-                  {isAmharic ? 'ልዩ አስተያየቶች እና የንባብ ማስታወሻዎች (አማራጭ)' : 'Specific Remarks & Reading Notes (Optional)'}
+                  {isAmharic ? 'ማስታወሻ (አማራጭ)' : 'Reading Notes (Optional)'}
                 </label>
                 <textarea
                   rows={4}
-                  placeholder={isAmharic ? 'ለምሳሌ፡ ለሥላሴ ሴሚናር የተጠቆመ፤ ትርጉሙን ለማነጻጸር...' : "e.g. Recommended by Father Vance for the Trinity seminar; want to compare Chadwick's translation with Outler..."}
+                  placeholder={isAmharic ? 'ለምሳሌ፡ ለሥላሴ ሴሚናር የተጠቆመ...' : 'e.g. Recommended for the seminar...'}
                   value={wantRemarks}
                   onChange={(e) => setWantRemarks(e.target.value)}
                   className="bg-theme-subtle border border-theme rounded-lg p-3 text-theme-main placeholder:text-theme-subtle focus:outline-hidden focus:border-theme-accent resize-none text-xs font-serif"
@@ -885,12 +691,12 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
         </div>
       )}
 
-      {/* Modal C: Add Book Note */}
+      {/* MODAL C: Add Note */}
       {isNoteModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
           onClick={() => setIsNoteModalOpen(false)}
         >
           <div
@@ -917,36 +723,17 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
             </div>
 
             <form onSubmit={handleCreateNote} className="flex flex-col gap-3 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="font-semibold text-theme-main font-serif">
-                    {isAmharic ? 'የምዕራፍ / የጥቅስ ማጣቀሻ' : 'Chapter / Passage Citation'}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Book VIII, Ch. 12 or §4.2"
-                    value={noteLocation}
-                    onChange={(e) => setNoteLocation(e.target.value)}
-                    className="bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-theme-main focus:outline-hidden focus:border-theme-accent font-serif"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label className="font-semibold text-theme-main font-serif">
-                    {isAmharic ? 'የምድብ መለያ' : 'Category Tag'}
-                  </label>
-                  <select
-                    value={noteTag}
-                    onChange={(e) => setNoteTag(e.target.value as any)}
-                    className="bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-theme-main focus:outline-hidden focus:border-theme-accent cursor-pointer font-serif"
-                  >
-                    <option value="Marginal Annotation">{isAmharic ? 'የኅዳግ ማስታወሻ' : 'Marginal Annotation'}</option>
-                    <option value="Lectio Divina">Lectio Divina</option>
-                    <option value="Contemplative Insight">{isAmharic ? 'የማሰላሰያ ግንዛቤ' : 'Contemplative Insight'}</option>
-                    <option value="Philosophical Note">{isAmharic ? 'የፍልስፍና ማስታወሻ' : 'Philosophical Note'}</option>
-                    <option value="Study Note">{isAmharic ? 'የጥናት ማስታወሻ' : 'Study Note'}</option>
-                  </select>
-                </div>
+              <div className="flex flex-col gap-1">
+                <label className="font-semibold text-theme-main font-serif">
+                  {isAmharic ? 'የምዕራፍ / የጥቅስ ማጣቀሻ (አማራጭ)' : 'Chapter / Passage Citation (Optional)'}
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Book VIII, Ch. 12 or §4.2"
+                  value={noteLocation}
+                  onChange={(e) => setNoteLocation(e.target.value)}
+                  className="bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-theme-main focus:outline-hidden focus:border-theme-accent font-serif"
+                />
               </div>
 
               <div className="flex flex-col gap-1">
@@ -985,12 +772,12 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
         </div>
       )}
 
-      {/* Modal D: Add Review */}
+      {/* MODAL D: Add Review */}
       {isReviewModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
           onClick={() => setIsReviewModalOpen(false)}
         >
           <div
@@ -1000,10 +787,10 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-theme">
               <div>
                 <span className="text-[10px] uppercase tracking-wider font-bold text-theme-accent block">
-                  {isAmharic ? 'መጽሐፍ ዳሰሳ' : 'Peer Appraisal'}
+                  {isAmharic ? 'መጽሐፍ ዳሰሳ' : 'Book Review'}
                 </span>
                 <h3 className="font-serif text-base sm:text-lg font-bold text-theme-main">
-                  {isAmharic ? `ለ${book.title} መጽሐፍ ዳሰሳ ጻፍ` : `Write Review for ${book.title}`}
+                  {isAmharic ? `ለ${book.title} ዳሰሳ ጻፍ` : `Write Review for ${book.title}`}
                 </h3>
               </div>
               <button
@@ -1045,46 +832,26 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="font-semibold text-theme-main font-serif">
-                    {isAmharic ? 'የትምህርት ትውፊት / ምድብ' : 'Theological Tradition / Category'}
-                  </label>
-                  <select
-                    value={revTradition}
-                    onChange={(e) => setRevTradition(e.target.value)}
-                    className="bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-theme-main focus:outline-hidden focus:border-theme-accent cursor-pointer font-serif"
-                  >
-                    <option value="Patristic">{isAmharic ? 'ፓትሪስቲክ (የአበው)' : 'Patristic'}</option>
-                    <option value="Orthodox">{isAmharic ? 'ኦርቶዶክስ' : 'Orthodox'}</option>
-                    <option value="Scholastic">{isAmharic ? 'ስኮላስቲክ' : 'Scholastic'}</option>
-                    <option value="Soteriology">{isAmharic ? 'ስነ-ድህነት' : 'Soteriology'}</option>
-                    <option value="Monastic">{isAmharic ? 'ገዳማዊ' : 'Monastic'}</option>
-                    <option value="Philosophy">{isAmharic ? 'ፍልስፍና' : 'Philosophy'}</option>
-                  </select>
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label className="font-semibold text-theme-main font-serif">
-                    {isAmharic ? 'የተነበበው እትም / ምንጭ' : 'Citation / Edition Tested'}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Chadwick translation (OUP)"
-                    value={revCitation}
-                    onChange={(e) => setRevCitation(e.target.value)}
-                    className="bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-theme-main focus:outline-hidden focus:border-theme-accent font-serif"
-                  />
-                </div>
+              <div className="flex flex-col gap-1">
+                <label className="font-semibold text-theme-main font-serif">
+                  {isAmharic ? 'ጥቅስ (አማራጭ)' : 'Quote (Optional)'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={isAmharic ? 'የመጽሐፉ ጥቅስ' : 'A quote from the book'}
+                  value={revQuote}
+                  onChange={(e) => setRevQuote(e.target.value)}
+                  className="bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-theme-main focus:outline-hidden focus:border-theme-accent font-serif"
+                />
               </div>
 
               <div className="flex flex-col gap-1">
                 <label className="font-semibold text-theme-main font-serif">
-                  {isAmharic ? 'የመጽሐፍ ዳሰሳ እና አስተያየት' : 'Appraisal & Critical Review'}
+                  {isAmharic ? 'የመጽሐፍ ዳሰሳ እና አስተያየት' : 'Appraisal & Review'}
                 </label>
                 <textarea
                   rows={4}
-                  placeholder={isAmharic ? 'የዚህን መጽሐፍ ወይም እትም የጽሑፍ ጥልቀት፣ ጠቀሜታ እና ጥራት ይገምግሙ...' : 'Evaluate the textual depth, theological significance, and quality of this treatise or edition...'}
+                  placeholder={isAmharic ? 'የዚህን መጽሐፍ የጽሑፍ ጥልቀት፣ ጠቀሜታ እና ጥራት ይገምግሙ...' : 'Evaluate the textual depth, theological significance, and quality of this treatise...'}
                   value={revBody}
                   onChange={(e) => setRevBody(e.target.value)}
                   required
@@ -1106,7 +873,7 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
                   className="px-4 py-2 rounded-lg bg-theme-accent text-white font-semibold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
                 >
                   <span className="material-symbols-outlined text-[16px]">send</span>
-                  <span>{isAmharic ? 'መጽሐፍ ዳሰሳ ለጥፍ' : 'Publish Review'}</span>
+                  <span>{isAmharic ? 'መጽሐፍ ዳሳሳ ለጥፍ' : 'Publish Review'}</span>
                 </button>
               </div>
             </form>

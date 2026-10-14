@@ -1,3 +1,189 @@
+// ============================================================
+// DB TYPES
+// These match the actual Supabase schema.
+// If you change the database, update these too.
+// ============================================================
+
+export type ReadingStatus = 'to_be_read' | 'reading' | 'finished' | 'dnf';
+
+export type VerificationStatus = 'unverified' | 'verified' | 'rejected';
+
+export type PathStatus = 'pending' | 'approved' | 'rejected';
+
+export type Difficulty = 'beginner' | 'intermediate' | 'advanced';
+
+// ---------- profiles ----------
+export interface Profile {
+  id: string;
+  username: string;
+  name: string | null;
+  bio: string | null;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------- books ----------
+export interface Book {
+  id: string;
+  title: string;
+  author_name: string;
+  description: string | null;
+  cover_url: string | null;
+  language: string;
+  page_count: number | null;
+  verification_status: VerificationStatus;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------- traditions ----------
+export interface Tradition {
+  id: string;
+  name: string;
+  slug: string;
+  created_at: string;
+}
+
+export interface BookTradition {
+  book_id: string;
+  tradition_id: string;
+}
+
+// ---------- tags ----------
+export interface Tag {
+  id: string;
+  slug: string;
+  name: string;
+  category: string | null;
+  created_at: string;
+}
+
+export interface BookTag {
+  book_id: string;
+  tag_id: string;
+}
+
+export interface DiscussionPostTag {
+  post_id: string;
+  tag_id: string;
+}
+
+// ---------- discussion_posts ----------
+export interface DiscussionPost {
+  id: string;
+  author_id: string | null;
+  parent_id: string | null;
+  book_id: string | null;
+  title: string | null;
+  content: string;
+  deleted_at: string | null;
+  is_moderated: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PostLike {
+  post_id: string;
+  user_id: string;
+  created_at: string;
+}
+
+// ---------- reviews ----------
+export interface Review {
+  id: string;
+  user_id: string;
+  book_id: string;
+  title: string | null;
+  content: string;
+  rating: number;
+  quote: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReviewComment {
+  id: string;
+  review_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReviewLike {
+  review_id: string;
+  user_id: string;
+  created_at: string;
+}
+
+// ---------- library_books ----------
+export interface LibraryBook {
+  user_id: string;
+  book_id: string;
+  status: ReadingStatus;
+  pages_read: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------- notes ----------
+export interface Note {
+  id: string;
+  user_id: string;
+  book_id: string;
+  title: string | null;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------- reading_paths ----------
+export interface ReadingPath {
+  id: string;
+  creator_id: string;
+  title: string;
+  description: string | null;
+  topic: string;
+  difficulty: Difficulty | null;
+  status: PathStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReadingPathBook {
+  reading_path_id: string;
+  book_id: string;
+  position: number;
+  note: string | null;
+}
+
+export interface SavedPath {
+  user_id: string;
+  path_id: string;
+  created_at: string;
+}
+
+export interface SavedReview {
+  user_id: string;
+  review_id: string;
+  created_at: string;
+}
+
+export interface SavedPost {
+  user_id: string;
+  post_id: string;
+  created_at: string;
+}
+
+// ============================================================
+// UI-ONLY TYPES
+// Not in the database. Used only by the frontend.
+// ============================================================
+
 export type ThemeMode = 'light' | 'navy' | 'burgundy' | 'gray' | 'brown' | 'vintage' | 'dark' | 'cream';
 
 export type ScreenId =
@@ -13,10 +199,11 @@ export type ScreenId =
   | 'review-detail'
   | 'notes'
   | 'profile'
-   | 'auth'
+  | 'auth'
   | 'bookmarks';
 
-export type ReadingStatus = 'want-to-read' | 'currently-reading' | 'read' | 'dnf';
+// ---------- Legacy shapes used by existing UI components ----------
+// These will be phased out. If you're writing new code, use the DB types above.
 
 export interface BookQuote {
   id: string;
@@ -31,52 +218,6 @@ export interface ExternalLibraryLink {
   type: 'worldcat' | 'archive' | 'academic' | 'ccel';
   url: string;
   description: string;
-}
-
-export interface Book {
-  id: string;
-  title: string;
-  originalTitle?: string;
-  author: string;
-  authorEra?: string;
-  authorBio?: string;
-  category: string;
-  categoryTag: string;
-  progress: number; // percentage
-  currentLocation: string;
-  notesCount: number;
-  circleCount: number;
-  coverImage?: string;
-  bgCode?: string;
-  codexLabel?: string;
-  era?: string;
-  totalPages?: number;
-  summary?: string;
-  historicalContext?: string;
-  
-  // Goodreads-style Catalog Metrics & State
-  rating: number; // e.g. 4.85
-  ratingsCount: number; // e.g. 1840
-  reviewsCount: number; // e.g. 246
-  ratingBreakdown: { stars: number; count: number; percentage: number }[];
-  readingStatus: ReadingStatus;
-  userRating?: number; // 0 = unrated, 1-5 = stars given by current user
-  userDateFinished?: string;
-  currentPage?: number;
-  
-  // Scholarly Edition Details
-  isbn?: string;
-  clavisId?: string;
-  originalLanguage?: string;
-  translator?: string;
-  publisher?: string;
-  publishedYear?: string;
-  editionFormat?: string;
-  
-  // Quotes & Related
-  quotes?: BookQuote[];
-  relatedBookIds?: string[];
-  externalLinks?: ExternalLibraryLink[];
 }
 
 export interface DialecticComment {
@@ -138,62 +279,6 @@ export interface ReadingStation {
   status: 'active' | 'scheduled' | 'locked';
   colloquiumCount?: number;
   reviewsCount?: number;
-}
-
-export interface ReadingPath {
-  id: string;
-  title: string;
-  category: string;
-  timeLeft: string;
-  percentage: number;
-  description: string;
-  currentStepLabel: string;
-  currentLectioLabel: string;
-  totalSteps: number;
-  completedSteps: number;
-  nextStepLabel: string;
-  lastReadNote?: string;
-  stations: ReadingStation[];
-  curator?: {
-    name: string;
-    title: string;
-    avatar: string;
-  };
-}
-
-export interface Review {
-  id: string;
-  bookId?: string;
-  bookTitle: string;
-  bookAuthor: string;
-  tradition: 'Patristic' | 'Orthodox' | 'Scholastic' | 'Soteriology' | string;
-  rating: number;
-  reviewerName: string;
-  reviewerAffiliation: string;
-  reviewerAvatar: string;
-  date: string;
-  quote: string;
-  citation: string;
-  peerReviewed?: boolean;
-  discussionCount: number;
-  bookCover?: string;
-  likesCount?: number;
-  userLiked?: boolean;
-  userSaved?: boolean;
-  fullReview?: string;
-  keyThemes?: string[];
-  historicalContext?: string;
-  chapterFocus?: string;
-}
-
-export interface Note {
-  id: string;
-  bookTitle: string;
-  timeAgo: string;
-  text: string;
-  tag: string;
-  location: string;
-  accentColor?: string;
 }
 
 export interface Bookmark {
