@@ -21,12 +21,12 @@ without being cold.
 with its author, description, cover, page count, language, and the tags
 that place it — patristic, ascetic, liturgical, whatever fits. Readers
 add books as they find them; the community and moderators keep the
-catalog clean over time.jyt
+catalog clean over time.
 
 **Reviews.** Write a review of anything you've read. Give it a rating,
 pull out a passage you want to remember, cite where it came from. Other
-readers can like reviews, comment on them, and save them for later.
-You can edit or delete your own. One review per person per book, so the
+readers can like reviews, comment on them, and save them for later. You
+can edit or delete your own. One review per person per book, so the
 ratings stay honest.
 
 **Discussions.** Every book has a single thread — created automatically
@@ -56,15 +56,11 @@ away.
 **Themes.** Eight color themes, from light to navy to vintage, so you
 can read in whatever feels right.
 
-**AI, later.** Ask a question and get an answer drawn only from books in
-the catalog, with citations. Get recommendations for a topic or a
-reading level. This is stubbed but not finished — the goal is a research
-assistant that stays inside the tradition rather than wandering off.
+**Moderation and roles.** Readers, curators, and admins. Curators can
+add books and submit reading paths. Admins approve paths, verify books,
+and manage the tag vocabulary. Users can report content that doesn't
+belong. Every action is checked by the database itself — Row Level
+Security means no one can read or write anything they aren't allowed to,
+regardless of what the frontend does.
 
-## Who it's for
-
-Orthodox readers who want a place to keep track of what they've read,
-write about it seriously, and talk about it with other people who are
-reading the same things. Not a general book site with an Orthodox
-section bolted on — an Orthodox site from the ground up.
 
