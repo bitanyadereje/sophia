@@ -154,7 +154,6 @@ export const App: React.FC = () => {
     setUser(prev => ({ ...prev, ...updated }));
   };
 
-  // TODO: wire to library_books table
   const handleUpdateBookStatus = (
     _bookId: string,
     _status: any,
@@ -308,7 +307,7 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      <Header
+           <Header
         currentScreen={currentScreen}
         onNavigate={(s) => {
           setCurrentScreen(s);
@@ -316,10 +315,11 @@ export const App: React.FC = () => {
         }}
         user={user}
         onOpenSearch={() => setIsSearchOpen(true)}
+        onOpenAuth={() => setIsAuthOpen(true)}
         theme={theme}
         onSetTheme={handleSetTheme}
       />
-
+      
       <main className="flex-1 flex flex-col">
         {currentScreen === 'home' && (
           <HomeFeedView

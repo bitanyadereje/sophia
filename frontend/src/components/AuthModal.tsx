@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BookOpen } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { supabase } from '../lib/supabase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -19,25 +20,104 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [showPassword, setShowPassword] = useState(false);
 
-  const [name, setName] = useState('Beatrice Moreau');
-  const [email, setEmail] = useState('b.moreau@sorbonne.theology.edu');
-  const [passphrase, setPassphrase] = useState('••••••••••••');
-  const [covenantAccepted, setCovenantAccepted] = useState(true);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [passphrase, setPassphrase] = useState('');
+  const [covenantAccepted, setCovenantAccepted] = useState(false);
   const [selectedDiscipline, setSelectedDiscipline] = useState<string>('Patristics');
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const disciplines = ['Patristics', 'Eastern Orthodoxy', 'Monasticism', 'Scholasticism', 'Reformed'];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!covenantAccepted && authMode === 'signup') {
-      onShowToast('Please agree to the community reading guidelines.');
+    setError(null);
+
+    if (authMode === 'signup' && !covenantAccepted) {
+      setError(isAmharic ? 'እባክዎ የማህበረሰቡን መመሪያዎች ይቀበሉ።' : 'Please agree to the community reading guidelines.');
       return;
     }
-    onAuthenticated(name, email);
-    onShowToast(authMode === 'signin' ? `Signed in as ${name}` : `Welcome, ${name}!`);
-    onClose();
+
+    setLoading(true);
+
+    try {
+      if (authMode === 'signup') {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password: passphrase,
+          options: {
+            data: {
+              name,
+              discipline: selectedDiscipline,
+            },
+          },
+        });
+
+        if (signUpError) {
+          setError(signUpError.message);
+          setLoading(false);
+          return;
+        }
+
+        // If email confirmation is off, session exists and user is logged in.
+        if (data.session) {
+          onAuthenticated(name, email);
+          onShowToast(isAmharic ? `እንኳን ደህና መጡ፣ ${name}!` : `Welcome, ${name}!`);
+          onClose();
+        } else {
+          onShowToast(
+            isAmharic
+              ? 'መለያ ተፈጥሯል። እባክዎ ኢሜይልዎን ያረጋግጡ።'
+              : 'Account created. Please check your email to verify.'
+          );
+          onClose();
+        }
+      } else {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password: passphrase,
+        });
+
+        if (signInError) {
+          setError(signInError.message);
+          setLoading(false);
+          return;
+        }
+
+        const displayName =
+          (data.user?.user_metadata as any)?.name || data.user?.email || 'Reader';
+
+        onAuthenticated(displayName, email);
+        onShowToast(isAmharic ? `እንኳን ደህና መጡ፣ ${displayName}!` : `Welcome back, ${displayName}!`);
+        onClose();
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setLoading(true);
+
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+
+    if (oauthError) {
+      setError(oauthError.message);
+      setLoading(false);
+    }
+    // On success, the browser redirects to Google, so no further code runs here.
   };
 
   return (
@@ -70,7 +150,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="flex bg-theme-subtle rounded-xl p-1 my-4 border border-theme">
           <button
             type="button"
-            onClick={() => setAuthMode('signin')}
+            onClick={() => { setAuthMode('signin'); setError(null); }}
             className={`flex-1 py-1.5 rounded-lg text-xs font-label-md uppercase tracking-wider font-semibold transition-all cursor-pointer ${
               authMode === 'signin' ? 'bg-theme-surface text-theme-main shadow-xs' : 'text-theme-muted hover:text-theme-main'
             }`}
@@ -79,7 +159,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => setAuthMode('signup')}
+            onClick={() => { setAuthMode('signup'); setError(null); }}
             className={`flex-1 py-1.5 rounded-lg text-xs font-label-md uppercase tracking-wider font-semibold transition-all cursor-pointer ${
               authMode === 'signup' ? 'bg-theme-surface text-theme-main shadow-xs' : 'text-theme-muted hover:text-theme-main'
             }`}
@@ -127,6 +207,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <input
                 type={showPassword ? 'text' : 'password'}
                 required
+                minLength={6}
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
                 placeholder="••••••••••••"
@@ -142,6 +223,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </span>
               </button>
             </div>
+            {authMode === 'signup' && (
+              <p className="text-[10px] text-theme-subtle mt-1">
+                {isAmharic ? 'ቢያንስ 6 ፊደሎች' : 'At least 6 characters'}
+              </p>
+            )}
           </div>
 
           {authMode === 'signup' && (
@@ -182,13 +268,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </label>
           )}
 
+          {error && (
+            <div className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50">
+              <p className="text-xs text-red-700 dark:text-red-400 font-sans">
+                {error}
+              </p>
+            </div>
+          )}
+
           <button
             type="submit"
-            className="w-full py-2.5 rounded-lg bg-theme-main hover:bg-theme-main/90 text-white font-label-md text-xs uppercase tracking-wider font-semibold transition-colors mt-2 shadow-sm cursor-pointer"
+            disabled={loading}
+            className="w-full py-2.5 rounded-lg bg-theme-main hover:bg-theme-main/90 disabled:opacity-60 disabled:cursor-not-allowed text-white font-label-md text-xs uppercase tracking-wider font-semibold transition-colors mt-2 shadow-sm cursor-pointer inline-flex items-center justify-center gap-2"
           >
-            {authMode === 'signin'
-              ? (isAmharic ? 'ወደ ሶፊያ ግባ' : 'Sign In to Sophia')
-              : (isAmharic ? 'መለያ ፍጠር' : 'Create Scholarly Account')}
+            {loading ? (
+              <>
+                <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                <span>{isAmharic ? 'በመጫን ላይ...' : 'Loading...'}</span>
+              </>
+            ) : authMode === 'signin' ? (
+              isAmharic ? 'ወደ ሶፊያ ግባ' : 'Sign In to Sophia'
+            ) : (
+              isAmharic ? 'መለያ ፍጠር' : 'Create Scholarly Account'
+            )}
           </button>
 
           <div className="relative flex py-1 items-center">
@@ -199,30 +301,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="flex-grow border-t border-theme"></div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2">
             <button
               type="button"
-              onClick={() => {
-                onAuthenticated('Beatrice Moreau', 'b.moreau@sorbonne.theology.edu');
-                onShowToast('Authenticated via Academic Google Workspace');
-                onClose();
-              }}
-              className="py-2 px-3 rounded-lg border border-theme bg-theme-subtle hover:bg-theme-muted text-xs font-semibold text-theme-main flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+              disabled={loading}
+              onClick={handleGoogleSignIn}
+              className="py-2 px-3 rounded-lg border border-theme bg-theme-subtle hover:bg-theme-muted disabled:opacity-60 disabled:cursor-not-allowed text-xs font-semibold text-theme-main flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
             >
               <span className="material-symbols-outlined text-[16px] text-red-600">mail</span>
-              <span>Google</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onAuthenticated('Beatrice Moreau', 'b.moreau@sorbonne.theology.edu');
-                onShowToast('Authenticated via Apple ID');
-                onClose();
-              }}
-              className="py-2 px-3 rounded-lg border border-theme bg-theme-subtle hover:bg-theme-muted text-xs font-semibold text-theme-main flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-            >
-              <span className="material-symbols-outlined text-[16px]">lock</span>
-              <span>Apple</span>
+              <span>{isAmharic ? 'በGoogle ይቀጥሉ' : 'Continue with Google'}</span>
             </button>
           </div>
         </form>

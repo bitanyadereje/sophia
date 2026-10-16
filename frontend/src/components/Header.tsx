@@ -9,15 +9,17 @@ interface HeaderProps {
   onNavigate: (screen: ScreenId) => void;
   user?: UserProfile;
   onOpenSearch?: () => void;
+  onOpenAuth?: () => void;
   theme: ThemeMode;
   onSetTheme: (theme: ThemeMode) => void;
-  titleContext?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentScreen,
   onNavigate,
+  user,
   onOpenSearch,
+  onOpenAuth,
   theme,
   onSetTheme,
 }) => {
@@ -42,13 +44,22 @@ export const Header: React.FC<HeaderProps> = ({
     setIsMobileMenuOpen(false);
   };
 
-const primaryNavLinks: { id: ScreenId; label: string }[] = [
-  { id: 'home', label: t('nav.home', 'Home') },
-  { id: 'paths', label: t('nav.paths', 'Paths') },
-  { id: 'library', label: t('nav.saved', 'Saved') },
-  { id: 'discussions', label: t('nav.discussions', 'Discussions') },
-  { id: 'reviews', label: t('nav.reviews', 'Reviews') }
-];
+  const handleProfileClick = () => {
+    if (user?.name) {
+      handleNavClick('profile');
+    } else {
+      onOpenAuth?.();
+      setIsMobileMenuOpen(false);
+    }
+  };
+
+  const primaryNavLinks: { id: ScreenId; label: string }[] = [
+    { id: 'home', label: t('nav.home', 'Home') },
+    { id: 'paths', label: t('nav.paths', 'Paths') },
+    { id: 'library', label: t('nav.saved', 'Saved') },
+    { id: 'discussions', label: t('nav.discussions', 'Discussions') },
+    { id: 'reviews', label: t('nav.reviews', 'Reviews') }
+  ];
 
   const allMobileNavLinks: { id: ScreenId; label: string; icon: string; desc: string }[] = [
     { id: 'home', label: isAmharic ? 'የማህበረሰብ ዜናዎች' : 'Community Feed', icon: 'temple_buddhist', desc: isAmharic ? 'የውይይቶች እና የመጽሐፍ ዳሰሳዎች ዜና' : 'Discussions & reviews feed' },
@@ -555,14 +566,17 @@ const primaryNavLinks: { id: ScreenId; label: string }[] = [
             )}
           </div>
 
+          {/* Profile / Sign In Button */}
           <button
             type="button"
-            onClick={() => handleNavClick('profile')}
-            aria-label={t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile')}
+            onClick={handleProfileClick}
+            aria-label={user?.name ? t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile') : (isAmharic ? 'ግባ' : 'Sign In')}
             className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${getGhostBtnClasses()}`}
-            title={t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile')}
+            title={user?.name ? t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile') : (isAmharic ? 'ግባ' : 'Sign In')}
           >
-            <span className="material-symbols-outlined text-[20px]">person</span>
+            <span className="material-symbols-outlined text-[20px]">
+              {user?.name ? 'person' : 'login'}
+            </span>
           </button>
 
           {/* Mobile Hamburger Navigation Button (Ghost Button) */}
@@ -613,6 +627,40 @@ const primaryNavLinks: { id: ScreenId; label: string }[] = [
               </div>
             </div>
 
+            {/* Mobile Sign In / Sign Out Row */}
+            <div className="p-3 rounded-xl bg-current/5 border border-current/10">
+              {user?.name ? (
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('profile')}
+                  className="w-full flex items-center justify-between text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px]">account_circle</span>
+                    <span className="text-xs font-serif font-bold">{user.name}</span>
+                  </div>
+                  <span className="text-[10px] opacity-70 uppercase tracking-wider">
+                    {isAmharic ? 'መገለጫ' : 'Profile'}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenAuth?.();
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px]">login</span>
+                    <span className="text-xs font-serif font-bold">{isAmharic ? 'ወደ ሶፊያ ግባ' : 'Sign In to Sophia'}</span>
+                  </div>
+                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </button>
+              )}
+            </div>
+
             <div className="px-2 pt-1 text-[10px] font-label-md uppercase tracking-wider font-bold opacity-75">
               {isAmharic ? 'የማውጫ ዝርዝር' : 'Navigation Menu'}
             </div>
@@ -650,4 +698,3 @@ const primaryNavLinks: { id: ScreenId; label: string }[] = [
     </header>
   );
 };
-
