@@ -289,7 +289,7 @@ export const App: React.FC = () => {
     );
   };
 
-  const handleAuthenticated = (name: string, _email: string) => {
+   const handleAuthenticated = (name: string, _email: string) => {
     setUser(prev => ({
       ...prev,
       name,
@@ -298,6 +298,17 @@ export const App: React.FC = () => {
     }));
   };
 
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Sign out failed:', error);
+      showToast('Could not sign out');
+      return;
+    }
+    setUser(INITIAL_USER);
+    setCurrentScreen('home');
+    showToast('Signed out');
+  };
   return (
     <div className="min-h-screen bg-theme-app text-theme-body relative flex flex-col font-sans antialiased selection:bg-theme-accent-light selection:text-theme-accent transition-colors duration-200">
       {toastMessage && (
@@ -316,10 +327,11 @@ export const App: React.FC = () => {
         user={user}
         onOpenSearch={() => setIsSearchOpen(true)}
         onOpenAuth={() => setIsAuthOpen(true)}
+        onSignOut = {handleSignOut}
         theme={theme}
         onSetTheme={handleSetTheme}
       />
-      
+
       <main className="flex-1 flex flex-col">
         {currentScreen === 'home' && (
           <HomeFeedView
@@ -549,6 +561,7 @@ export const App: React.FC = () => {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onOpenAuth={() => setIsAuthOpen(true)}
+            onSignOut={handleSignOut}
             onShowToast={showToast}
             theme={theme}
             onSetTheme={handleSetTheme}

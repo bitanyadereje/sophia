@@ -9,6 +9,7 @@ interface ProfileViewProps {
   onUpdateUser: (updated: Partial<UserProfile>) => void;
   onNavigate: (screen: ScreenId) => void;
   onOpenAuth: () => void;
+  onSignOut?: () => void;
   onShowToast: (msg: string) => void;
   theme: ThemeMode;
   onSetTheme: (theme: ThemeMode) => void;
@@ -19,9 +20,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onUpdateUser,
   onNavigate,
   onOpenAuth,
+  onSignOut,
   onShowToast,
   theme,
-  onSetTheme
+  onSetTheme,
 }) => {
   const { language, setLanguage, t, isAmharic } = useLanguage();
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
@@ -531,13 +533,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </section>
 
         {/* Portal Sign-in */}
-        <button
-          onClick={onOpenAuth}
-          className="w-full py-3 rounded-xl border border-theme bg-theme-surface hover:bg-theme-subtle text-theme-main text-xs font-label-md uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
-        >
-          <span className="material-symbols-outlined text-[16px]">account_circle</span>
-          <span>{isAmharic ? 'መለያ ቀይር / ውጣ' : 'Switch Account / Sign Out'}</span>
-        </button>
+       <button
+  onClick={onSignOut}
+  className="w-full py-3 rounded-xl border border-theme bg-theme-surface hover:bg-theme-subtle text-red-600 text-xs font-label-md uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+>
+  <span className="material-symbols-outlined text-[16px]">logout</span>
+  <span>{isAmharic ? 'ውጣ' : 'Sign Out'}</span>
+</button>
       </div>
 
       {/* Edit Profile Modal */}

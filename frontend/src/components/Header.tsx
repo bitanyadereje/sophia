@@ -10,6 +10,7 @@ interface HeaderProps {
   user?: UserProfile;
   onOpenSearch?: () => void;
   onOpenAuth?: () => void;
+  onSignOut?: () => void;
   theme: ThemeMode;
   onSetTheme: (theme: ThemeMode) => void;
 }
@@ -20,18 +21,24 @@ export const Header: React.FC<HeaderProps> = ({
   user,
   onOpenSearch,
   onOpenAuth,
+  onSignOut,
   theme,
   onSetTheme,
 }) => {
   const { language, setLanguage, toggleLanguage, t, isAmharic } = useLanguage();
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const themeMenuRef = useRef<HTMLDivElement>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (themeMenuRef.current && !themeMenuRef.current.contains(event.target as Node)) {
         setIsThemeMenuOpen(false);
+      }
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -42,15 +49,6 @@ export const Header: React.FC<HeaderProps> = ({
   const handleNavClick = (screen: ScreenId) => {
     onNavigate(screen);
     setIsMobileMenuOpen(false);
-  };
-
-  const handleProfileClick = () => {
-    if (user?.name) {
-      handleNavClick('profile');
-    } else {
-      onOpenAuth?.();
-      setIsMobileMenuOpen(false);
-    }
   };
 
   const primaryNavLinks: { id: ScreenId; label: string }[] = [
@@ -74,7 +72,6 @@ export const Header: React.FC<HeaderProps> = ({
 
   const currentTheme = THEMES_LIST.find((t) => t.id === theme) || THEMES_LIST[0];
 
-  // Theme-aware style helpers
   const getHeaderClasses = () => {
     switch (theme) {
       case 'cream':
@@ -395,7 +392,6 @@ export const Header: React.FC<HeaderProps> = ({
           id="header-brand-logo"
           className="flex items-center gap-2 sm:gap-2.5 text-left group focus:outline-none flex-shrink-0"
         >
-          {/* Sophia Logo Icon */}
           <div
             className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center transition-all flex-shrink-0 group-hover:scale-105 ${getLogoBadgeClasses()}`}
           >
@@ -429,9 +425,9 @@ export const Header: React.FC<HeaderProps> = ({
           })}
         </nav>
 
-        {/* Action Controls: Language Toggle, Search, Theme Switcher & Mobile Menu Toggle */}
+        {/* Action Controls */}
         <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
-          {/* Language Toggle (EN | አማ) */}
+          {/* Language Toggle */}
           <div
             className="flex items-center rounded-lg border border-current/20 p-0.5 text-xs font-serif shrink-0 bg-current/5"
             role="group"
@@ -463,7 +459,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
 
-          {/* Global Search Trigger (Icon-Only Ghost Button: Magnifying Glass) */}
+          {/* Search */}
           {onOpenSearch && (
             <button
               type="button"
@@ -476,7 +472,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Theme Selector Popover (Icon-Only Ghost Button: Paint Palette) */}
+          {/* Theme Menu */}
           <div className="relative" ref={themeMenuRef}>
             <button
               type="button"
@@ -518,7 +514,6 @@ export const Header: React.FC<HeaderProps> = ({
                           isSelected ? 'ring-1 ring-inset ring-current/25' : ''
                         }`}
                       >
-                        {/* Theme circle indicator */}
                         <div
                           className="w-4 h-4 rounded-full border border-black/25 mt-0.5 flex-shrink-0 shadow-2xs"
                           style={{ backgroundColor: t.previewColor }}
@@ -543,7 +538,6 @@ export const Header: React.FC<HeaderProps> = ({
                             {t.subtitle}
                           </span>
 
-                          {/* 5-Color Harmonic Swatches */}
                           <div className="flex items-center gap-1 mt-1.5 pt-1 border-t border-current/10">
                             {t.palette.map((p) => (
                               <span
@@ -566,20 +560,67 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* Profile / Sign In Button */}
-          <button
-            type="button"
-            onClick={handleProfileClick}
-            aria-label={user?.name ? t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile') : (isAmharic ? 'ግባ' : 'Sign In')}
-            className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${getGhostBtnClasses()}`}
-            title={user?.name ? t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile') : (isAmharic ? 'ግባ' : 'Sign In')}
-          >
-            <span className="material-symbols-outlined text-[20px]">
-              {user?.name ? 'person' : 'login'}
-            </span>
-          </button>
+          {/* Profile / Sign In */}
+          {user?.name ? (
+            <div className="relative" ref={profileMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                aria-label={t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile')}
+                className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${getGhostBtnClasses()}`}
+                title={t('nav.profile', isAmharic ? 'መገለጫ' : 'Profile')}
+              >
+                <span className="material-symbols-outlined text-[20px]">person</span>
+              </button>
 
-          {/* Mobile Hamburger Navigation Button (Ghost Button) */}
+              {isProfileMenuOpen && (
+                <div
+                  className={`absolute right-0 mt-2 w-52 rounded-xl border shadow-2xl py-1 z-50 ${getDropdownClasses()}`}
+                >
+                  <div className="px-3 py-2 border-b border-current/15">
+                    <p className="text-xs font-serif font-bold truncate">{user.name}</p>
+                    <p className="text-[10px] opacity-70 truncate">
+                      {user.title || (isAmharic ? 'አንባቢ' : 'Reader')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsProfileMenuOpen(false);
+                      handleNavClick('profile');
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs font-serif hover:bg-current/10 flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">person</span>
+                    <span>{isAmharic ? 'መገለጫ' : 'Profile'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsProfileMenuOpen(false);
+                      onSignOut?.();
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs font-serif text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">logout</span>
+                    <span>{isAmharic ? 'ውጣ' : 'Sign Out'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onOpenAuth?.()}
+              aria-label={isAmharic ? 'ግባ' : 'Sign In'}
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${getGhostBtnClasses()}`}
+              title={isAmharic ? 'ግባ' : 'Sign In'}
+            >
+              <span className="material-symbols-outlined text-[20px]">account_circle</span>
+            </button>
+          )}
+
+          {/* Mobile Hamburger */}
           <button
             type="button"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -595,11 +636,11 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Responsive Mobile Drawer Menu */}
+      {/* Mobile Drawer */}
       {isMobileMenuOpen && (
         <div className={`md:hidden max-h-[calc(100vh-4rem)] overflow-y-auto shadow-2xl animate-fade-in ${getMobileDrawerClasses()}`}>
           <div className="p-4 flex flex-col gap-2">
-            {/* Mobile Language Switcher Row */}
+            {/* Mobile Language Switcher */}
             <div className="flex items-center justify-between p-3 rounded-xl bg-current/5 border border-current/10">
               <div className="flex items-center gap-2">
                 <Globe className="w-4 h-4 opacity-75" />
@@ -627,22 +668,34 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
 
-            {/* Mobile Sign In / Sign Out Row */}
+            {/* Mobile Profile / Sign In */}
             <div className="p-3 rounded-xl bg-current/5 border border-current/10">
               {user?.name ? (
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('profile')}
-                  className="w-full flex items-center justify-between text-left cursor-pointer"
-                >
+                <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
                     <span className="material-symbols-outlined text-[18px]">account_circle</span>
                     <span className="text-xs font-serif font-bold">{user.name}</span>
                   </div>
-                  <span className="text-[10px] opacity-70 uppercase tracking-wider">
-                    {isAmharic ? 'መገለጫ' : 'Profile'}
-                  </span>
-                </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleNavClick('profile')}
+                      className="flex-1 py-1.5 rounded-lg bg-current/10 hover:bg-current/15 text-xs font-serif cursor-pointer"
+                    >
+                      {isAmharic ? 'መገለጫ' : 'Profile'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        onSignOut?.();
+                      }}
+                      className="flex-1 py-1.5 rounded-lg bg-red-600/90 text-white hover:bg-red-600 text-xs font-serif cursor-pointer"
+                    >
+                      {isAmharic ? 'ውጣ' : 'Sign Out'}
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <button
                   type="button"
