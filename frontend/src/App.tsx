@@ -21,6 +21,7 @@ import { supabase } from './lib/supabase';
 // These will be replaced by Supabase fetches as features are built.
 // ============================================================
 const INITIAL_USER: UserProfile = {
+  id: '',
   name: '',
   title: '',
   location: '',
@@ -52,16 +53,23 @@ export const App: React.FC = () => {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(INITIAL_BOOKMARKS);
 
   // Fetch books from Supabase on mount
-  useEffect(() => {
+    useEffect(() => {
     supabase
       .from('books')
       .select('*')
       .then(({ data, error }) => {
-        if (error) {
-          console.error('Failed to load books:', error);
-          return;
-        }
-        setBooks((data ?? []) as Book[]);
+        if (error) console.error('Failed to load books:', error);
+        else setBooks((data ?? []) as Book[]);
+      });
+
+
+      supabase
+      .from('reviews')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) console.error('Failed to load reviews:', error);
+        else setReviews((data ?? []) as Review[]);
       });
   }, []);
 
@@ -150,8 +158,35 @@ export const App: React.FC = () => {
     }
   }, [toastMessage]);
 
-  const handleUpdateUser = (updated: Partial<UserProfile>) => {
+    const handleUpdateUser = (updated: Partial<UserProfile>) => {
     setUser(prev => ({ ...prev, ...updated }));
+  };
+
+  // ADD THE NEW FUNCTION HERE
+  const handleAddBook = async (newBookData: { title: string; author_name: string }) => {
+    if (!user || !user.name) {
+      showToast('You must be logged in to add a book');
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('books')
+      .insert({
+        title: newBookData.title,
+        author_name: newBookData.author_name,
+        language: 'en',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Failed to add book:', error);
+      showToast('Could not add book');
+      return;
+    }
+
+    setBooks(prev => [data as Book, ...prev]);
+    showToast('Book added successfully!');
   };
 
   const handleUpdateBookStatus = (
@@ -244,9 +279,66 @@ export const App: React.FC = () => {
   const handleAddComment = (c: DialecticComment) => {
     setColloquiumComments(prev => [...prev, c]);
   };
+  const handleAddReview = async (data: any) => {
+    if (!user || !user.id) {
+      showToast('You must be logged in to write a review');
+      return;
+    }
 
-  const handleAddReview = (r: Review) => {
-    setReviews(prev => [r, ...prev]);
+    // If it comes from BookDetailView, it already has a book_id.
+    // If it comes from ReviewsView, it has bookTitle and bookAuthor.
+    let bookId = data.book_id;
+    
+    if (!bookId && data.bookTitle) {
+      // Look up or create the book
+      const { data: existingBooks } = await supabase
+        .from('books')
+        .select('id')
+        .ilike('title', data.bookTitle)
+        .limit(1);
+
+      if (existingBooks && existingBooks.length > 0) {
+        bookId = existingBooks[0].id;
+      } else {
+        const { data: newBook, error: bookError } = await supabase
+          .from('books')
+          .insert({
+            title: data.bookTitle,
+            author_name: data.bookAuthor,
+            language: 'en',
+            verification_status: 'unverified',
+          })
+          .select('id')
+          .single();
+
+        if (bookError) {
+          showToast('Failed to create book');
+          return;
+        }
+        bookId = newBook.id;
+      }
+    }
+
+    // Now insert the review
+    const { data: newReview, error: reviewError } = await supabase
+      .from('reviews')
+      .insert({
+        book_id: bookId,
+        user_id: user.id,
+        content: data.content,
+        rating: data.rating,
+        quote: data.quote || null,
+      })
+      .select()
+      .single();
+
+    if (reviewError) {
+      showToast('Failed to save review');
+      return;
+    }
+
+    setReviews(prev => [newReview as Review, ...prev]);
+    showToast('Review published!');
   };
 
   const handleUpdateReview = (id: string, updated: Partial<Review>) => {
