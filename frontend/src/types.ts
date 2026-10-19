@@ -25,6 +25,7 @@ export interface Profile {
 
 // ---------- books ----------
 export interface Book {
+  codexLabel: string;
   id: string;
   title: string;
   author_name: string;
@@ -292,6 +293,7 @@ export interface Bookmark {
 }
 
 export interface UserProfile {
+  id: string;
   name: string;
   title: string;
   location: string;

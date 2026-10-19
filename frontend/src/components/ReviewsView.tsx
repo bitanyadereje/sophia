@@ -7,7 +7,7 @@ interface ReviewsViewProps {
   currentUser?: UserProfile;
   targetReviewId?: string | null;
   onClearTargetReview?: () => void;
-  onAddReview: (data: any) => void; // Changed to any to accept the new format
+  onAddReview: (data: { bookTitle: string; bookAuthor: string; rating: number; quote: string; content: string }) => Promise<void>;
   onUpdateReview?: (id: string, updated: Partial<Review>) => void;
   onDeleteReview?: (id: string) => void;
   onSelectBook?: (bookId: string) => void;
@@ -60,7 +60,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     }
   }, [targetReviewId]);
 
-  // Form state (Added Title and Author back)
+  // Form state
   const [newBookTitle, setNewBookTitle] = useState('');
   const [newBookAuthor, setNewBookAuthor] = useState('');
   const [newRating, setNewRating] = useState(5.0);
@@ -69,7 +69,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
 
   const traditions = ['All', 'Patristic', 'Orthodox', 'Scholastic', 'Soteriology'];
   
-  // FIXED: Use id instead of name
   const isAuthor = (r: Review) => Boolean(currentUser?.id && r.user_id === currentUser.id);
 
   const handleToggleLike = (id: string, e: React.MouseEvent) => {
@@ -123,8 +122,8 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       return;
     }
     setEditingReview(r);
-    setNewBookTitle(r.book_id); // We only have ID here, but it's fine for editing
-    setNewBookAuthor('');
+    setNewBookTitle(r.title || '');
+    setNewBookAuthor(''); // We don't store author on the review directly yet
     setNewRating(r.rating);
     setNewQuote(r.quote || '');
     setNewFullReview(r.content);
@@ -149,27 +148,33 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     return (r.title || '').toLowerCase().includes(q) || (r.content || '').toLowerCase().includes(q) || (r.quote || '').toLowerCase().includes(q);
   });
 
-  const handleSubmitReview = (e: React.FormEvent) => {
+  const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newBookTitle.trim() || !newQuote.trim()) return;
+    if (!newBookTitle.trim() || !newBookAuthor.trim() || !newQuote.trim()) return;
 
     if (editingReview && onUpdateReview) {
       const values = { rating: newRating, quote: newQuote, content: newFullReview.trim() || newQuote.trim() };
       onUpdateReview(editingReview.id, values);
       onShowToast('Review updated');
     } else {
-      if (!currentUser) {
+      if (!currentUser?.id) {
         onShowToast('You must be logged in to write a review');
         return;
       }
-      onAddReview({
-        bookTitle: newBookTitle,
-        bookAuthor: newBookAuthor,
-        rating: newRating,
-        quote: newQuote,
-        content: newFullReview.trim() || newQuote.trim()
-      });
-      onShowToast('Review published');
+      
+      try {
+        await onAddReview({
+          bookTitle: newBookTitle,
+          bookAuthor: newBookAuthor,
+          rating: newRating,
+          quote: newQuote,
+          content: newFullReview.trim() || newQuote.trim()
+        });
+        onShowToast('Review published');
+      } catch (error) {
+        onShowToast('Failed to publish review. Check console.');
+        return; // Stop here so the modal doesn't close on failure
+      }
     }
     
     setNewBookTitle('');
@@ -340,6 +345,36 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                       <span className="font-sans">{isSaved ? 'Saved' : 'Save'}</span>
                     </button>
                   </div>
+
+                  {isCommentDrawerOpen && (
+                    <div onClick={(e) => e.stopPropagation()} className="mt-2 pt-2.5 border-t border-theme/70 flex flex-col gap-2.5">
+                      {comments.length > 0 && (
+                        <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                          {comments.map((c) => (
+                            <div key={c.id} className="bg-theme-subtle/80 rounded-lg p-2 text-xs">
+                              <div className="flex items-center justify-between text-[10px] text-theme-muted mb-0.5">
+                                <span className="font-semibold text-theme-main">{c.author}</span>
+                                <span>{c.timeAgo}</span>
+                              </div>
+                              <p className="text-theme-body font-serif">{c.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <form onSubmit={(e) => handleAddComment(rev.id, e)} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={commentInputs[rev.id] || ''}
+                          onChange={(e) => setCommentInputs((prev) => ({ ...prev, [rev.id]: e.target.value }))}
+                          placeholder={isAmharic ? 'በዚህ ግምገማ ላይ አስተያየት ይጻፉ...' : 'Write a comment on this review...'}
+                          className="flex-1 bg-theme-subtle border border-theme rounded-lg px-2.5 py-1.5 text-xs text-theme-main placeholder:text-theme-subtle focus:outline-none focus:border-theme-accent"
+                        />
+                        <button type="submit" className="px-3 py-1.5 rounded-lg bg-theme-main text-theme-surface hover:opacity-90 text-xs font-semibold cursor-pointer transition-opacity">
+                          {isAmharic ? 'ለጥፍ' : 'Post'}
+                        </button>
+                      </form>
+                    </div>
+                  )}
                 </div>
               </article>
             );

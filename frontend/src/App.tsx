@@ -52,8 +52,50 @@ export const App: React.FC = () => {
   const [notes, setNotes] = useState<Note[]>(INITIAL_NOTES);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(INITIAL_BOOKMARKS);
 
-  // Fetch books from Supabase on mount
-    useEffect(() => {
+  const loadProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, name, username, avatar_url')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Failed to load profile:', error);
+      return;
+    }
+    if (!data) {
+      setUser(prev => ({ ...prev, id: userId }));
+      return;
+    }
+
+    setUser(prev => ({
+      ...prev,
+      id: data.id,
+      name: data.name || data.username || 'Reader',
+      avatar: data.avatar_url || '',
+    }));
+  };
+
+  // Fetch books, reviews, and the signed-in user's profile on mount.
+  useEffect(() => {
+    let isMounted = true;
+    const loadCurrentProfile = async (userId: string) => {
+      if (isMounted) await loadProfile(userId);
+    };
+
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) console.error('Failed to load auth session:', error);
+      if (session?.user) void loadCurrentProfile(session.user.id);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        void loadCurrentProfile(session.user.id);
+      } else if (isMounted) {
+        setUser(INITIAL_USER);
+      }
+    });
+
     supabase
       .from('books')
       .select('*')
@@ -71,6 +113,11 @@ export const App: React.FC = () => {
         if (error) console.error('Failed to load reviews:', error);
         else setReviews((data ?? []) as Review[]);
       });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Sync theme with DOM data-theme attribute
@@ -279,52 +326,45 @@ export const App: React.FC = () => {
   const handleAddComment = (c: DialecticComment) => {
     setColloquiumComments(prev => [...prev, c]);
   };
-  const handleAddReview = async (data: any) => {
-    if (!user || !user.id) {
-      showToast('You must be logged in to write a review');
-      return;
+  const handleAddReview = async (data: Review | { bookTitle: string; bookAuthor: string; rating: number; quote: string; content: string }) => {
+    if (!user.id) {
+      showToast('You must be logged in');
+      throw new Error('No user ID');
     }
 
-    // If it comes from BookDetailView, it already has a book_id.
-    // If it comes from ReviewsView, it has bookTitle and bookAuthor.
-    let bookId = data.book_id;
-    
-    if (!bookId && data.bookTitle) {
-      // Look up or create the book
-      const { data: existingBooks } = await supabase
-        .from('books')
-        .select('id')
-        .ilike('title', data.bookTitle)
-        .limit(1);
+    const bookTitle = 'bookTitle' in data ? data.bookTitle : data.title || '';
+    let book = 'book_id' in data
+      ? books.find(item => item.id === data.book_id)
+      : books.find(
+        item => item.title.trim().toLowerCase() === data.bookTitle.trim().toLowerCase()
+          && item.author_name.trim().toLowerCase() === data.bookAuthor.trim().toLowerCase()
+      );
 
-      if (existingBooks && existingBooks.length > 0) {
-        bookId = existingBooks[0].id;
-      } else {
-        const { data: newBook, error: bookError } = await supabase
-          .from('books')
-          .insert({
-            title: data.bookTitle,
-            author_name: data.bookAuthor,
-            language: 'en',
-            verification_status: 'unverified',
-          })
-          .select('id')
-          .single();
-
-        if (bookError) {
-          showToast('Failed to create book');
-          return;
-        }
-        bookId = newBook.id;
+    if (!book) {
+      if ('book_id' in data) {
+        throw new Error('Book for this review was not found');
       }
-    }
+      const { data: createdBook, error: bookError } = await supabase
+        .from('books')
+        .insert({ title: data.bookTitle.trim(), author_name: data.bookAuthor.trim(), language: 'en' })
+        .select('*')
+        .single();
 
-    // Now insert the review
-    const { data: newReview, error: reviewError } = await supabase
+      if (bookError) {
+        console.error('Failed to find or create review book:', bookError);
+        showToast('Could not find or create book');
+        throw bookError;
+      }
+      book = createdBook as Book;
+      setBooks(prev => [...prev, book as Book]);
+    }
+    
+    const { data: newReview, error } = await supabase
       .from('reviews')
       .insert({
-        book_id: bookId,
+        book_id: book.id,
         user_id: user.id,
+        title: bookTitle.trim() || null,
         content: data.content,
         rating: data.rating,
         quote: data.quote || null,
@@ -332,15 +372,15 @@ export const App: React.FC = () => {
       .select()
       .single();
 
-    if (reviewError) {
-      showToast('Failed to save review');
-      return;
+    if (error) {
+      console.error('4. SUPABASE ERROR:', error);
+      showToast('Database error: ' + error.message);
+      throw error;
     }
 
     setReviews(prev => [newReview as Review, ...prev]);
-    showToast('Review published!');
   };
-
+  
   const handleUpdateReview = (id: string, updated: Partial<Review>) => {
     setReviews(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
   };
@@ -381,13 +421,13 @@ export const App: React.FC = () => {
     );
   };
 
-   const handleAuthenticated = (name: string, _email: string) => {
-    setUser(prev => ({
-      ...prev,
-      name,
-      title: "Sorbonne Patristics Scholar",
-      location: "Paris Abbey"
-    }));
+  const handleAuthenticated = async (_name: string, _email: string) => {
+    const { data: { user: authUser }, error } = await supabase.auth.getUser();
+    if (error) {
+      console.error('Failed to get authenticated user:', error);
+      return;
+    }
+    if (authUser) await loadProfile(authUser.id);
   };
 
   const handleSignOut = async () => {
