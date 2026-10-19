@@ -7,6 +7,7 @@ import { useLanguage } from '../context/LanguageContext';
 interface ProfileViewProps {
   user: UserProfile;
   onUpdateUser: (updated: Partial<UserProfile>) => void;
+  onAvatarUpload?: (file: File) => void;
   onNavigate: (screen: ScreenId) => void;
   onOpenAuth: () => void;
   onSignOut?: () => void;
@@ -18,6 +19,7 @@ interface ProfileViewProps {
 export const ProfileView: React.FC<ProfileViewProps> = ({
   user,
   onUpdateUser,
+  onAvatarUpload,
   onNavigate,
   onOpenAuth,
   onSignOut,
@@ -80,19 +82,38 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <article className="bg-theme-surface rounded-2xl p-5 sm:p-7 border border-theme shadow-sm flex flex-col gap-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="relative">
-                <img
-                  src={user.avatar}
-                  alt={user.name}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover shadow-sm ring-2 ring-theme-accent/40"
-                />
-                <span
-                  className="material-symbols-outlined absolute -bottom-1 -right-1 text-sm p-1 rounded-full bg-theme-accent text-white shadow-xs"
-                  title="Active Reader"
-                >
-                  history_edu
-                </span>
+              
+              {/* UPDATED AVATAR BLOCK WITH UPLOAD */}
+              <div className="relative group">
+                {user.avatar ? (
+                  <img
+                    src={user.avatar}
+                    alt={user.name}
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover shadow-sm ring-2 ring-theme-accent/40"
+                  />
+                ) : (
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-theme-accent text-white flex items-center justify-center font-serif font-bold text-2xl shadow-sm ring-2 ring-theme-accent/40">
+                    {user.name?.charAt(0) || '?'}
+                  </div>
+                )}
+                
+                {onAvatarUpload && (
+                  <label className="absolute inset-0 bg-black/50 text-white rounded-full flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                    <span className="material-symbols-outlined text-[20px]">photo_camera</span>
+                    <span className="text-[9px] mt-0.5 font-semibold uppercase tracking-wider">Upload</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) onAvatarUpload(file);
+                      }}
+                    />
+                  </label>
+                )}
               </div>
+
               <div className="flex flex-col">
                 <div className="flex items-center gap-1.5">
                   <h1 className="font-serif text-[19px] sm:text-[22px] font-bold text-theme-main">{user.name}</h1>
@@ -130,7 +151,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="bg-theme-subtle rounded-xl p-3 text-center border border-theme">
               <span className="font-serif text-xl sm:text-2xl font-bold text-theme-main block">{user.booksRead}</span>
               <span className="text-[10px] font-label-md uppercase tracking-wider text-theme-subtle">
-                {isAmharic ? 'የተነበቡ መጻሕፍት' : 'Books Read'}
+                {isAmharic ? 'የተነበዩ መጻሕፍት' : 'Books Read'}
               </span>
             </div>
             <div className="bg-theme-subtle rounded-xl p-3 text-center border border-theme">
@@ -176,7 +197,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-theme-muted font-medium">
-                  {isAmharic ? `${user.booksRead} ከ ${user.goalTarget} መጻሕፍት ተነበቡ` : `${user.booksRead} of ${user.goalTarget} Books Read`}
+                  {isAmharic ? `${user.booksRead} ከ ${user.goalTarget} መጻሕፍት ተነበዩ` : `${user.booksRead} of ${user.goalTarget} Books Read`}
                 </span>
                 <span className="font-bold text-theme-main">
                   {goalPercentage}% {isAmharic ? 'ተጠናቋል' : 'Complete'}
@@ -324,7 +345,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       <span className="text-[9px] font-sans font-medium uppercase tracking-wider text-theme-muted">
                         {themeOption.category}
                       </span>
-                      {/* Swatches dots */}
                       <div className="flex items-center gap-1">
                         {themeOption.palette.map((item, i) => (
                           <span
@@ -533,13 +553,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </section>
 
         {/* Portal Sign-in */}
-       <button
-  onClick={onSignOut}
-  className="w-full py-3 rounded-xl border border-theme bg-theme-surface hover:bg-theme-subtle text-red-600 text-xs font-label-md uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
->
-  <span className="material-symbols-outlined text-[16px]">logout</span>
-  <span>{isAmharic ? 'ውጣ' : 'Sign Out'}</span>
-</button>
+        <button
+          onClick={onSignOut}
+          className="w-full py-3 rounded-xl border border-theme bg-theme-surface hover:bg-theme-subtle text-red-600 text-xs font-label-md uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+        >
+          <span className="material-symbols-outlined text-[16px]">logout</span>
+          <span>{isAmharic ? 'ውጣ' : 'Sign Out'}</span>
+        </button>
       </div>
 
       {/* Edit Profile Modal */}

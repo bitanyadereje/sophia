@@ -205,8 +205,28 @@ export const App: React.FC = () => {
     }
   }, [toastMessage]);
 
-    const handleUpdateUser = (updated: Partial<UserProfile>) => {
+     const handleUpdateUser = async (updated: Partial<UserProfile>) => {
+    // 1. Update the UI instantly
     setUser(prev => ({ ...prev, ...updated }));
+
+    // 2. If logged in, save to Supabase
+    if (user?.id) {
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .update({
+            name: updated.name,
+            avatar_url: updated.avatar,
+            // Add other fields here if you add them to the UI later
+          })
+          .eq('id', user.id);
+
+        if (error) throw error;
+      } catch (error) {
+        console.error('Failed to save profile update:', error);
+        showToast('Failed to save to database');
+      }
+    }
   };
 
   // ADD THE NEW FUNCTION HERE
@@ -430,7 +450,7 @@ export const App: React.FC = () => {
     if (authUser) await loadProfile(authUser.id);
   };
 
-  const handleSignOut = async () => {
+    const handleSignOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error('Sign out failed:', error);
@@ -441,6 +461,50 @@ export const App: React.FC = () => {
     setCurrentScreen('home');
     showToast('Signed out');
   };
+
+  // --- ADD THIS NEW FUNCTION HERE ---
+  const handleAvatarUpload = async (file: File) => {
+    if (!user || !user.id) {
+      showToast('You must be logged in');
+      return;
+    }
+
+    try {
+      // 1. Create a unique file path (userId + timestamp)
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${user.id}-${Date.now()}.${fileExt}`;
+
+      // 2. Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // 3. Get the public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      // 4. Save URL to the user's profile in the database
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      // 5. Update local state so the UI changes instantly
+      setUser(prev => ({ ...prev, avatar: publicUrl }));
+      showToast('Profile picture updated!');
+
+    } catch (error: any) {
+      console.error('Upload failed:', error);
+      showToast('Failed to upload image');
+    }
+  };
+  // ----------------------------------
+
   return (
     <div className="min-h-screen bg-theme-app text-theme-body relative flex flex-col font-sans antialiased selection:bg-theme-accent-light selection:text-theme-accent transition-colors duration-200">
       {toastMessage && (
@@ -685,9 +749,10 @@ export const App: React.FC = () => {
         )}
 
         {currentScreen === 'profile' && (
-          <ProfileView
+            <ProfileView
             user={user}
             onUpdateUser={handleUpdateUser}
+            onAvatarUpload={handleAvatarUpload}
             onNavigate={(s) => {
               setCurrentScreen(s);
               window.scrollTo({ top: 0, behavior: 'smooth' });
