@@ -9,8 +9,9 @@ interface BookDetailViewProps {
   reviews?: Review[];
   currentUser?: UserProfile;
   onAddNote?: (n: Note) => void;
-  onAddReview?: (r: Review) => void;
+  onAddReview?: (reviewData: any) => void; 
   onUpdateBookStatus?: (
+
     bookId: string,
     status: ReadingStatus,
     userRating?: number,
