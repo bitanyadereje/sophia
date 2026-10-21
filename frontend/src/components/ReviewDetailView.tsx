@@ -1,64 +1,70 @@
 import React, { useState } from 'react';
-import { Review, ReviewComment, ReviewLike, UserProfile, Book, ScreenId } from '../types';
+import { Review, UserProfile, Book, ScreenId } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 
 interface ReviewDetailViewProps {
   review: Review;
   currentUser: UserProfile;
   book?: Book;
-  comments: ReviewComment[];
-  likes: ReviewLike[];
   onBack: () => void;
   onNavigate: (screen: ScreenId) => void;
   onSelectBook: (bookId: string) => void;
-  onToggleLike: (reviewId: string) => Promise<void>;
-  onAddComment: (reviewId: string, content: string) => Promise<void>;
+  onToggleLike: (reviewId: string) => void;
   onToggleSave: (reviewId: string) => void;
   onShowToast: (message: string) => void;
+}
+
+interface ReviewCommentItem {
+  id: string;
+  author: string;
+  avatar: string;
+  affiliation: string;
+  timeAgo: string;
+  text: string;
 }
 
 export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
   review,
   currentUser,
   book,
-  comments,
-  likes,
   onBack,
   onNavigate,
   onSelectBook,
   onToggleLike,
-  onAddComment,
   onToggleSave,
   onShowToast,
 }) => {
   const { isAmharic } = useLanguage();
   const [commentInput, setCommentInput] = useState('');
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const isLiked = likes.some(like => like.user_id === currentUser.id);
+  const [comments, setComments] = useState<ReviewCommentItem[]>([]);
 
   const reviewDate = new Date(review.created_at).toLocaleDateString(
     isAmharic ? 'am-ET' : 'en',
     { year: 'numeric', month: 'long', day: 'numeric' }
   );
 
-  const handleAddComment = async (e: React.FormEvent) => {
+  const handleAddComment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentInput.trim()) {
-      onShowToast(isAmharic ? '\u12a5\u12e3\u12ad\u12ce \u12a0\u1235\u1270\u12eb\u12e8\u1275 \u12ed\u132b\u1349' : 'Please write a reflection before posting');
+      onShowToast(isAmharic ? 'እባክዎ ከመለጠፍዎ በፊት ማሰላሰያ ይጻፉ' : 'Please write a reflection before posting');
       return;
     }
-    if (!currentUser.id) {
-      onShowToast(isAmharic ? '\u12a0\u1235\u1270\u12eb\u12e8\u1275 \u1208\u121b\u1235\u1240\u1228\u1265 \u1218\u1300\u1218\u122a\u12eb \u12ed\u130d\u1261' : 'Sign in to comment on reviews');
-      return;
-    }
-    try {
-      await onAddComment(review.id, commentInput.trim());
-      setCommentInput('');
-      onShowToast(isAmharic ? 'ማሰላሰያው ወደ ግምገማ ውይይት ተለጥፏል' : 'Reflection posted to review discussion');
-    } catch {
-      // Keep the draft if saving the comment fails.
-    }
+
+    const newComment: ReviewCommentItem = {
+      id: `comm-${Date.now()}`,
+      author: currentUser.name,
+      avatar: currentUser.avatar,
+      affiliation: currentUser.title || (isAmharic ? 'የሶፊያ አንባቢ' : 'Sophia Reader'),
+      timeAgo: isAmharic ? 'አሁን' : 'Just now',
+      text: commentInput.trim()
+    };
+
+    setComments(prev => [...prev, newComment]);
+    setCommentInput('');
+    onShowToast(isAmharic ? 'ማሰላሰያው ወደ ግምገማ ውይይት ተለጥፏል' : 'Reflection posted to review discussion');
   };
+
   const handleCopyCitation = () => {
     const textToCopy = `"${review.quote ?? ''}" — ${book?.title ?? 'Review'} (Review by ${currentUser.name})`;
     if (navigator?.clipboard) {
@@ -86,13 +92,13 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => { void onToggleLike(review.id); }}
+              onClick={() => onToggleLike(review.id)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-theme text-theme-muted hover:text-theme-main hover:bg-theme-subtle text-xs font-sans transition-colors cursor-pointer"
               id="detail-like-btn"
               title={isAmharic ? 'ውደድ' : 'Like review'}
             >
-              <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0" }}>favorite</span>
-              <span>{likes.length}</span>
+              <span className="material-symbols-outlined text-[16px]">favorite</span>
+              <span>0</span>
             </button>
 
             <button
@@ -256,25 +262,25 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <img
-                        src={comment.user_id === currentUser.id ? currentUser.avatar : ''}
-                        alt={comment.user_id === currentUser.id ? currentUser.name : 'Reader'}
+                        src={comment.avatar}
+                        alt={comment.author}
                         className="w-7 h-7 rounded-full object-cover border border-theme flex-shrink-0"
                       />
                       <div>
                         <span className="text-xs font-serif font-bold text-theme-main block">
-                          {comment.user_id === currentUser.id ? currentUser.name : 'Reader'}
+                          {comment.author}
                         </span>
                         <span className="text-[10px] text-theme-muted font-sans block">
-                          {comment.user_id === currentUser.id ? currentUser.title : (isAmharic ? '\u12e8\u1236\u134a\u12eb \u12a0\u1295\u1263\u1262' : 'Sophia Reader')}
+                          {comment.affiliation}
                         </span>
                       </div>
                     </div>
                     <span className="text-[11px] text-theme-subtle font-sans">
-                      {new Date(comment.created_at).toLocaleDateString(isAmharic ? 'am-ET' : 'en')}
+                      {comment.timeAgo}
                     </span>
                   </div>
                   <p className="text-xs sm:text-sm text-theme-body font-sans leading-relaxed pl-9.5">
-                    {comment.content}
+                    {comment.text}
                   </p>
                 </div>
               ))}

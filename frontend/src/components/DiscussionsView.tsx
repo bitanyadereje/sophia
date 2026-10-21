@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { DiscussionPost, Question, QuestionReply, ScreenId, UserProfile } from '../types';
+import { Question, QuestionReply, ScreenId, UserProfile } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 
 interface DiscussionsViewProps {
@@ -7,16 +7,10 @@ interface DiscussionsViewProps {
   currentUser?: UserProfile;
   targetQuestionId?: string | null;
   onClearTargetQuestion?: () => void;
-  onAddQuestion: (q: Question) => Promise<void>;
-  onUpdateQuestion?: (id: string, updated: Partial<Question>) => Promise<void>;
-  onDeleteQuestion?: (id: string) => Promise<void>;
-  onAddReply?: (questionId: string, replyText: string, parentReplyId?: string, replyToAuthor?: string) => Promise<void>;
-  onToggleThreadLike: (postId: string) => Promise<void>;
-  onToggleThreadSave: (postId: string) => Promise<void>;
-  onToggleReplyLike: (replyId: string) => Promise<void>;
-  onLoadThreadReplies: (threadId: string) => Promise<DiscussionPost[] | undefined>;
-  likedPostIds: Set<string>;
-  savedPostIds: Set<string>;
+  onAddQuestion: (q: Question) => void;
+  onUpdateQuestion?: (id: string, updated: Partial<Question>) => void;
+  onDeleteQuestion?: (id: string) => void;
+  onAddReply?: (questionId: string, replyText: string, parentReplyId?: string, replyToAuthor?: string) => void;
   onNavigate: (screen: ScreenId) => void;
   onShowToast: (msg: string) => void;
 }
@@ -244,12 +238,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
   onUpdateQuestion,
   onDeleteQuestion,
   onAddReply,
-  onToggleThreadLike,
-  onToggleThreadSave,
-  onToggleReplyLike,
-  onLoadThreadReplies,
-  likedPostIds,
-  savedPostIds,
   onNavigate,
   onShowToast
 }) => {
@@ -263,10 +251,10 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'discussed'>('recent');
 
-  // Optimistic state for likes and saves; canonical values come from App.
-  const [optimisticLikes, setOptimisticLikes] = useState<Record<string, boolean>>({});
-  const [optimisticSaves, setOptimisticSaves] = useState<Record<string, boolean>>({});
-  const [optimisticReplyLikes, setOptimisticReplyLikes] = useState<Record<string, boolean>>({});
+  // Interactive local states for likes, saves, and reply likes
+  const [likedQuestions, setLikedQuestions] = useState<Record<string, boolean>>({});
+  const [savedQuestions, setSavedQuestions] = useState<Record<string, boolean>>({ 'q-conf-1': true });
+  const [likedReplies, setLikedReplies] = useState<Record<string, boolean>>({});
 
   // Inline replying ID for deep nested replies
   const [inlineReplyingId, setInlineReplyingId] = useState<string | null>(null);
@@ -319,52 +307,30 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleToggleLike = async (id: string) => {
-    const isLiked = optimisticLikes[id] ?? likedPostIds.has(id);
-    setOptimisticLikes(prev => ({ ...prev, [id]: !isLiked }));
-    try { await onToggleThreadLike(id); }
-    catch { setOptimisticLikes(prev => ({ ...prev, [id]: isLiked })); onShowToast('Could not save — try again'); }
+  const handleToggleLike = (id: string) => {
+    const isLiked = !!likedQuestions[id];
+    setLikedQuestions((prev) => ({ ...prev, [id]: !isLiked }));
+    onShowToast(isLiked ? 'Like removed' : 'Liked discussion');
   };
 
-  const handleToggleSave = async (id: string) => {
-    const isSaved = optimisticSaves[id] ?? savedPostIds.has(id);
-    setOptimisticSaves(prev => ({ ...prev, [id]: !isSaved }));
-    try { await onToggleThreadSave(id); }
-    catch { setOptimisticSaves(prev => ({ ...prev, [id]: isSaved })); onShowToast('Could not save — try again'); }
+  const handleToggleSave = (id: string) => {
+    const isSaved = !!savedQuestions[id];
+    setSavedQuestions((prev) => ({ ...prev, [id]: !isSaved }));
+    onShowToast(isSaved ? 'Removed from bookmarks' : 'Bookmarked discussion');
   };
 
-  const handleToggleReplyLike = async (replyId: string) => {
-    const reply = findReply(activeQuestion?.replies || [], replyId);
-    const isLiked = optimisticReplyLikes[replyId] ?? !!reply?.userLiked;
-    setOptimisticReplyLikes(prev => ({ ...prev, [replyId]: !isLiked }));
-    try { await onToggleReplyLike(replyId); }
-    catch { setOptimisticReplyLikes(prev => ({ ...prev, [replyId]: isLiked })); onShowToast('Could not save — try again'); }
+  const handleToggleReplyLike = (replyId: string) => {
+    const isLiked = !!likedReplies[replyId];
+    setLikedReplies((prev) => ({ ...prev, [replyId]: !isLiked }));
+    onShowToast(isLiked ? 'Like removed' : 'Liked reply');
   };
 
-  const findReply = (replies: QuestionReply[], replyId: string): QuestionReply | undefined => {
-    for (const reply of replies) {
-      if (reply.id === replyId) return reply;
-      const nested = findReply(reply.replies || [], replyId);
-      if (nested) return nested;
-    }
-    return undefined;
-  };
-
-  const handleDirectNestedReply = async (parentId: string, replyToAuthor: string, text: string) => {
+  const handleDirectNestedReply = (parentId: string, replyToAuthor: string, text: string) => {
     if (!activeQuestion) return;
-    try {
-      if (onAddReply) await onAddReply(activeQuestion.id, text, parentId, replyToAuthor);
-      const fresh = await onLoadThreadReplies(activeQuestion.id);
-      if (fresh) setThreadRepliesInQuestion(activeQuestion.id, fresh);
-      onShowToast(`Replied to ${replyToAuthor}`);
-    } catch { onShowToast('Could not save — try again'); }
-  };
-
-  const setThreadRepliesInQuestion = (threadId: string, posts: DiscussionPost[]) => {
-    type PostWithAuthor = DiscussionPost & { author?: { name?: string | null; username?: string; avatar_url?: string | null } };
-    const toReply = (post: PostWithAuthor): QuestionReply => ({
-      id: post.id, author: post.author?.name || post.author?.username || 'Reader', authorAvatar: post.author?.avatar_url || '', timeAgo: 'Just now', text: post.content, likesCount: 0, userLiked: false, replies: []
-    });
+    if (onAddReply) {
+      onAddReply(activeQuestion.id, text, parentId, replyToAuthor);
+    }
+    onShowToast(`Replied to ${replyToAuthor}`);
   };
 
   const handleCancelReplyingTo = () => {
@@ -372,20 +338,19 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     setThreadReplyInput('');
   };
 
-  const handleSubmitThreadReply = async (e: React.FormEvent) => {
+  const handleSubmitThreadReply = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeQuestion) return;
     const text = threadReplyInput.trim();
     if (!text) return;
 
-    try {
-      if (onAddReply) await onAddReply(activeQuestion.id, text, replyingTo?.replyId, replyingTo?.author);
-      const fresh = await onLoadThreadReplies(activeQuestion.id);
-      if (fresh) setThreadRepliesInQuestion(activeQuestion.id, fresh);
-      onShowToast(replyingTo ? `Replied to ${replyingTo.author}` : 'Reflection posted to thread');
-      setThreadReplyInput('');
-      setReplyingTo(null);
-    } catch { onShowToast('Could not save — try again'); }
+    if (onAddReply) {
+      onAddReply(activeQuestion.id, text, replyingTo?.replyId, replyingTo?.author);
+    }
+
+    onShowToast(replyingTo ? `Replied to ${replyingTo.author}` : 'Reflection posted to thread');
+    setThreadReplyInput('');
+    setReplyingTo(null);
   };
 
   const handleOpenNewQuestion = () => {
@@ -408,7 +373,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     setIsNewQuestionModalOpen(true);
   };
 
-  const handleDeleteQuestion = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteQuestion = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const target = questions.find((item) => item.id === id);
     if (target && !isAuthor(target)) {
@@ -416,7 +381,9 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       return;
     }
     if (window.confirm('Are you sure you wish to delete this question?')) {
-      if (onDeleteQuestion) await onDeleteQuestion(id);
+      if (onDeleteQuestion) {
+        onDeleteQuestion(id);
+      }
       if (activeThreadId === id) {
         handleBackToFeed();
       }
@@ -424,30 +391,43 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     }
   };
 
-  const handleSubmitQuestionModal = async (e: React.FormEvent) => {
+  const handleSubmitQuestionModal = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
 
-    try {
-      if (editingQuestion && onUpdateQuestion) {
-        await onUpdateQuestion(editingQuestion.id, {
-          title: newTitle,
-          body: newBody,
-          topic: newTopic
-        });
-        onShowToast('Question updated');
-      } else {
-        await onAddQuestion({ topic: newTopic, title: newTitle, body: newBody || 'Seeking thoughts and reflections on this passage.' } as Question);
-        onShowToast('New question posted to community');
-      }
+    if (editingQuestion && onUpdateQuestion) {
+      onUpdateQuestion(editingQuestion.id, {
+        title: newTitle,
+        body: newBody,
+        topic: newTopic
+      });
+      onShowToast('Question updated');
+    } else {
+      const created: Question = {
+        id: `q-${Date.now()}`,
+        author: currentUser?.name || 'Beatrice Moreau',
+        authorAvatar:
+          currentUser?.avatar ||
+          'https://lh3.googleusercontent.com/aida-public/AB6AXuC6SXLN7BmYMhMaHuQx6dHdGP7WSd8gbDml9nW92fqjiNQk4_iMslB3RGC5D_6BZzOnYcL2Zh66XVylOLICR1N7YwIqLTCg2F4NCIRD5oyIZLvleFHsSP1hcr3UeQJUDsUROeWS2K0TjEy9M_eQJjQFQqw-ru56VlLRKmCvbCMvrAEumn6YT9dS3OXU3k2CpGD3iDmB8eyULvQTX7yMnP-qk8WtEoickeJeA_ZxOWEd0v-sVX7e5e1xgA',
+        timeAgo: 'Just now',
+        topic: newTopic,
+        title: newTitle,
+        body: newBody || 'Seeking thoughts and reflections on this passage.',
+        repliesCount: 0,
+        likesCount: 1,
+        saved: false,
+        replies: []
+      };
 
-      setNewTitle('');
-      setNewBody('');
-      setEditingQuestion(null);
-      setIsNewQuestionModalOpen(false);
-    } catch {
-      onShowToast('Could not save — try again');
+      onAddQuestion(created);
+      onShowToast('New question posted to community');
+      setActiveThreadId(created.id);
     }
+
+    setNewTitle('');
+    setNewBody('');
+    setEditingQuestion(null);
+    setIsNewQuestionModalOpen(false);
   };
 
   const filteredQuestions = questions
@@ -526,15 +506,15 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                   type="button"
                   onClick={() => handleToggleSave(activeQuestion.id)}
                   className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-                    (optimisticSaves[activeQuestion.id] ?? savedPostIds.has(activeQuestion.id))
+                    savedQuestions[activeQuestion.id]
                       ? 'text-theme-gold'
                       : 'text-theme-muted hover:text-theme-main hover:bg-theme-subtle'
                   }`}
-                  title={(optimisticSaves[activeQuestion.id] ?? savedPostIds.has(activeQuestion.id)) ? 'Bookmarked' : 'Bookmark thread'}
+                  title={savedQuestions[activeQuestion.id] ? 'Bookmarked' : 'Bookmark thread'}
                 >
                   <span
                     className="material-symbols-outlined text-[19px]"
-                    style={{ fontVariationSettings: (optimisticSaves[activeQuestion.id] ?? savedPostIds.has(activeQuestion.id)) ? "'FILL' 1" : "'FILL' 0" }}
+                    style={{ fontVariationSettings: savedQuestions[activeQuestion.id] ? "'FILL' 1" : "'FILL' 0" }}
                   >
                     bookmark
                   </span>
@@ -621,19 +601,21 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                     type="button"
                     onClick={() => handleToggleLike(activeQuestion.id)}
                     className={`inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
-                      (optimisticLikes[activeQuestion.id] ?? likedPostIds.has(activeQuestion.id))
+                      likedQuestions[activeQuestion.id]
                         ? 'text-theme-accent font-medium'
                         : 'hover:text-theme-main'
                     }`}
                   >
                     <span
                       className="material-symbols-outlined text-[18px]"
-                      style={{ fontVariationSettings: (optimisticLikes[activeQuestion.id] ?? likedPostIds.has(activeQuestion.id)) ? "'FILL' 1" : "'FILL' 0" }}
+                      style={{ fontVariationSettings: likedQuestions[activeQuestion.id] ? "'FILL' 1" : "'FILL' 0" }}
                     >
                       thumb_up
                     </span>
                     <span className="tabular-nums">
-                      {activeQuestion.likesCount}{' '}
+                      {likedQuestions[activeQuestion.id]
+                        ? activeQuestion.likesCount + 1
+                        : activeQuestion.likesCount}{' '}
                       {isAmharic ? 'መውደዶች' : 'Likes'}
                     </span>
                   </button>
@@ -680,7 +662,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       key={reply.id}
                       comment={reply}
                       depth={0}
-                      likedReplies={optimisticReplyLikes}
+                      likedReplies={likedReplies}
                       onToggleLike={handleToggleReplyLike}
                       inlineReplyingId={inlineReplyingId}
                       onSetInlineReplyingId={setInlineReplyingId}
@@ -876,9 +858,9 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
             {/* Question Feed Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredQuestions.map((q) => {
-                const isLiked = optimisticLikes[q.id] ?? likedPostIds.has(q.id);
-                const isSaved = optimisticSaves[q.id] ?? savedPostIds.has(q.id);
-                const likesCount = q.likesCount;
+                const isLiked = !!likedQuestions[q.id];
+                const isSaved = !!savedQuestions[q.id];
+                const likesCount = isLiked ? q.likesCount + 1 : q.likesCount;
                 const totalReplies = countAllReplies(q.replies);
 
                 return (
