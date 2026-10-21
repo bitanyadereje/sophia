@@ -56,83 +56,115 @@ export const App: React.FC = () => {
   const [notes, setNotes] = useState<Note[]>(INITIAL_NOTES);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(INITIAL_BOOKMARKS);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [reviewerProfiles, setReviewerProfiles] = useState<Record<string, { name?: string | null; username?: string | null; avatar_url?: string | null; avatar?: string | null; title?: string | null }>>({});
 
-  // Fetch books from Supabase on mount
+  const loadReviewerProfilesForReviews = async (reviewList: Review[]) => {
+    const reviewerIds = [...new Set(reviewList.map((review) => review.user_id).filter(Boolean))];
+
+    if (reviewerIds.length === 0) {
+      setReviewerProfiles({});
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, name, username, avatar_url')
+      .in('id', reviewerIds);
+
+    if (error) {
+      console.error('Failed to load reviewer profiles:', error);
+      return;
+    }
+
+    const nextProfiles = (data ?? []).reduce<Record<string, { name?: string | null; username?: string | null; avatar_url?: string | null; avatar?: string | null; title?: string | null }>>((acc, profile) => {
+      acc[profile.id] = {
+        name: profile.name,
+        username: profile.username,
+        avatar_url: profile.avatar_url,
+        avatar: profile.avatar_url,
+      };
+      return acc;
+    }, {});
+
+    setReviewerProfiles(nextProfiles);
+  };
+
+  const loadProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, name, username, avatar_url')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Failed to load profile:', error);
+      return;
+    }
+
+    if (!data) {
+      const { data: authData } = await supabase.auth.getUser();
+      const fallbackName = authData.user?.user_metadata?.name || authData.user?.email || 'Reader';
+      setUser(prev => ({
+        ...prev,
+        name: fallbackName,
+        avatar: '',
+      }));
+      return;
+    }
+
+    setUser(prev => ({
+      ...prev,
+      name: data.name || data.username || 'Reader',
+      avatar: data.avatar_url || '',
+    }));
+  };
+
+  // Fetch books, reviews, and the signed-in user's profile on mount.
   useEffect(() => {
+    let isMounted = true;
+    const loadCurrentProfile = async (userId: string) => {
+      if (isMounted) await loadProfile(userId);
+    };
+
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) console.error('Failed to load auth session:', error);
+      setAuthUserId(session?.user?.id ?? null);
+      if (session?.user) void loadCurrentProfile(session.user.id);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const userId = session?.user?.id ?? null;
+      setAuthUserId(userId);
+      if (userId) {
+        void loadCurrentProfile(userId);
+      } else if (isMounted) {
+        setUser(INITIAL_USER);
+      }
+    });
+
     supabase
       .from('books')
       .select('*')
       .then(({ data, error }) => {
-        if (error) {
-          console.error('Failed to load books:', error);
-          return;
-        }
-        setBooks((data ?? []) as Book[]);
+        if (error) console.error('Failed to load books:', error);
+        else setBooks((data ?? []) as Book[]);
       });
-  }, []);
 
-  /**
-   * Load reviews from Supabase.
-   * Public SELECT is allowed by RLS, so this works for guests and members.
-   */
-  const loadReviews = async () => {
-    const { data, error } = await supabase
+
+      supabase
       .from('reviews')
       .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Failed to load reviews:', error);
-      return;
-    }
-
-    setReviews((data ?? []) as Review[]);
-  };
-
-  useEffect(() => {
-    loadReviews();
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const syncAuthUser = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!mounted) return;
-      setAuthUserId(data.user?.id ?? null);
-    };
-
-    syncAuthUser();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUserId(session?.user?.id ?? null);
-    });
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) console.error('Failed to load reviews:', error);
+        else setReviews((data ?? []) as Review[]);
+      });
 
     return () => {
-      mounted = false;
+      isMounted = false;
       subscription.unsubscribe();
     };
   }, []);
-
-  const mapReviewMutationError = (error: any): string => {
-    const code = error?.code;
-
-    if (code === '23505') {
-      return 'You already reviewed this book. Edit your existing review instead.';
-    }
-
-    if (code === '23503') {
-      return 'Invalid book. Please select a valid book from the catalog.';
-    }
-
-    if (code === '42501') {
-      return 'Permission denied. Please sign in and try again.';
-    }
-
-    return error?.message || 'Unexpected database error.';
-  };
 
   // Sync theme with DOM data-theme attribute
   useEffect(() => {
@@ -219,8 +251,124 @@ export const App: React.FC = () => {
     }
   }, [toastMessage]);
 
-  const handleUpdateUser = (updated: Partial<UserProfile>) => {
+     const handleUpdateUser = async (updated: Partial<UserProfile>) => {
+    // 1. Update the UI instantly
     setUser(prev => ({ ...prev, ...updated }));
+
+    // 2. If logged in, save to Supabase
+    const targetUserId = authUserId;
+    if (targetUserId) {
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .update({
+            name: updated.name,
+            avatar_url: updated.avatar,
+          })
+          .eq('id', targetUserId);
+
+        if (error) throw error;
+      } catch (error) {
+        console.error('Failed to save profile update:', error);
+        showToast('Failed to save to database');
+      }
+    }
+  };
+
+  /**
+   * Resolve a book to one canonical row. Both review creation and any future
+   * reading-path book picker should use this function rather than inserting
+   * books independently. This currently matches normalized title + author;
+   * a bibliographic search/selection UI should supply verified metadata before
+   * creation where available.
+   */
+  type BookInput = {
+    book_id?: string;
+    bookTitle?: string;
+    bookAuthor?: string;
+    title?: string;
+    author_name?: string;
+    language?: string;
+    cover_url?: string | null;
+    page_count?: number | null;
+  };
+
+  const normalizeBookText = (value: string | null | undefined) =>
+    (value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+
+  const findOrCreateBook = async (input: BookInput): Promise<Book> => {
+    if (!authUserId) throw new Error('You must be signed in to add a new book.');
+
+    // If the UI selected a canonical book, validate that it still exists.
+    if (input.book_id) {
+      const existing = books.find((book) => book.id === input.book_id);
+      if (existing) return existing;
+
+      const { data, error } = await supabase
+        .from('books')
+        .select('*')
+        .eq('id', input.book_id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error('That book could not be found. Search the catalog again.');
+      const found = data as Book;
+      setBooks((previous) => previous.some((book) => book.id === found.id) ? previous : [found, ...previous]);
+      return found;
+    }
+
+    const title = (input.bookTitle ?? input.title ?? '').trim();
+    const author = (input.bookAuthor ?? input.author_name ?? '').trim();
+    if (!title || !author) throw new Error('A book title and author are required.');
+
+    // Query the database, not just React state, so a stale local list is less
+    // likely to cause a duplicate when another user has already added the book.
+    const { data: existingBooks, error: searchError } = await supabase
+      .from('books')
+      .select('*');
+    if (searchError) throw searchError;
+
+    const match = (existingBooks ?? []).find((book: Book) =>
+      normalizeBookText(book.title) === normalizeBookText(title) &&
+      normalizeBookText(book.author_name) === normalizeBookText(author)
+    ) as Book | undefined;
+
+    if (match) {
+      setBooks((previous) => previous.some((book) => book.id === match.id) ? previous : [match, ...previous]);
+      return match;
+    }
+
+    // New user-submitted records remain unverified. Do not mark a book verified
+    // just because a user entered its title and author.
+    const { data: created, error: createError } = await supabase
+      .from('books')
+      .insert({
+        title,
+        author_name: author,
+        language: input.language ?? 'en',
+        cover_url: input.cover_url ?? null,
+        page_count: input.page_count ?? null,
+        verification_status: 'unverified',
+        created_by: authUserId,
+      })
+      .select('*')
+      .single();
+
+    if (createError) throw createError;
+    const createdBook = created as Book;
+    setBooks((previous) => previous.some((book) => book.id === createdBook.id) ? previous : [createdBook, ...previous]);
+    return createdBook;
+  };
+
+  const handleAddBook = async (newBookData: { title: string; author_name: string }) => {
+    try {
+      const book = await findOrCreateBook(newBookData);
+      showToast(book.verification_status === 'verified' ? 'Book found in catalog.' : 'Book found or submitted for verification.');
+      return book;
+    } catch (error) {
+      console.error('Failed to find or add book:', error);
+      showToast(error instanceof Error ? error.message : 'Could not add book.');
+      return null;
+    }
   };
 
   const handleUpdateBookStatus = (
@@ -313,57 +461,67 @@ export const App: React.FC = () => {
   const handleAddComment = (c: DialecticComment) => {
     setColloquiumComments(prev => [...prev, c]);
   };
-
-  /**
-   * Create a review using authenticated user UUID + real book UUID.
-   */
-  const handleAddReview = async (input: {
-    book_id: string;
-    title?: string | null;
-    content: string;
-    rating: number;
-    quote?: string | null;
-  }): Promise<MutationResult> => {
-    if (!authUserId) {
-      return { ok: false, error: 'You must be signed in to publish a review.' };
-    }
-
-    const payload = {
-      user_id: authUserId,
-      book_id: input.book_id,
-      title: input.title ?? null,
-      content: input.content,
-      rating: input.rating,
-      quote: input.quote ?? null,
-    };
-
-    const { data, error } = await supabase
-      .from('reviews')
-      .insert(payload)
-      .select('*')
-      .single();
-
-    if (error) {
-      return { ok: false, error: mapReviewMutationError(error) };
-    }
-
-    setReviews((prev) => [data as Review, ...prev]);
-    return { ok: true };
+  const mapReviewMutationError = (error: any): string => {
+    if (error?.code === '23505') return 'You already reviewed this book. Edit your existing review instead.';
+    if (error?.code === '23503') return 'The selected book is no longer available. Search the catalog again.';
+    if (error?.code === '42501') return 'Permission denied. Please sign in and try again.';
+    return error?.message || 'Unexpected database error.';
   };
 
-  /**
-   * Update only caller-owned review rows. RLS enforces ownership server-side.
-   */
-  const handleUpdateReview = async (
-    id: string,
-    updated: Partial<Review>
-  ): Promise<MutationResult> => {
-    if (!authUserId) {
-      return { ok: false, error: 'You must be signed in to edit a review.' };
+  /** Resolves the selected or manually entered book, then persists its review. */
+  const handleAddReview = async (data: any): Promise<any> => {
+    if (!authUserId) return { ok: false, error: 'You must be signed in to publish a review.' };
+    if (typeof data.content !== 'string' || !data.content.trim()) {
+      return { ok: false, error: 'Please write a detailed review.' };
+    }
+    if (!Number.isInteger(data.rating) || data.rating < 1 || data.rating > 5) {
+      return { ok: false, error: 'Rating must be between 1 and 5.' };
     }
 
-    const patch = {
-      ...updated,
+    try {
+      const book = await findOrCreateBook({
+        book_id: data.book_id,
+        bookTitle: data.bookTitle,
+        bookAuthor: data.bookAuthor,
+        title: data.title,
+        author_name: data.author_name,
+        language: data.language,
+        cover_url: data.cover_url,
+        page_count: data.page_count,
+      });
+
+      const { data: newReview, error } = await supabase
+        .from('reviews')
+        .insert({
+          user_id: authUserId,
+          book_id: book.id,
+          title: data.reviewTitle ?? (data.book_id ? data.title ?? null : null),
+          content: data.content,
+          rating: data.rating,
+          quote: data.quote || null,
+        })
+        .select('*')
+        .single();
+
+      if (error) return { ok: false, error: mapReviewMutationError(error) };
+      setReviews((previous) => [newReview as Review, ...previous]);
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : mapReviewMutationError(error);
+      return { ok: false, error: message };
+    }
+  };
+
+  /** Persist edits; RLS and the user_id filter both enforce ownership. */
+  const handleUpdateReview = async (id: string, updated: Partial<Review>): Promise<any> => {
+    if (!authUserId) return { ok: false, error: 'You must be signed in to edit a review.' };
+
+    // Only allow review fields to be changed from this handler.
+    const patch: Partial<Review> & { updated_at: string } = {
+      ...(updated.title !== undefined ? { title: updated.title } : {}),
+      ...(updated.content !== undefined ? { content: updated.content } : {}),
+      ...(updated.rating !== undefined ? { rating: updated.rating } : {}),
+      ...(updated.quote !== undefined ? { quote: updated.quote } : {}),
       updated_at: new Date().toISOString(),
     };
 
@@ -375,21 +533,13 @@ export const App: React.FC = () => {
       .select('*')
       .single();
 
-    if (error) {
-      return { ok: false, error: mapReviewMutationError(error) };
-    }
-
-    setReviews((prev) => prev.map((r) => (r.id === id ? (data as Review) : r)));
+    if (error) return { ok: false, error: mapReviewMutationError(error) };
+    setReviews((previous) => previous.map((review) => review.id === id ? data as Review : review));
     return { ok: true };
   };
 
-  /**
-   * Delete only caller-owned review rows. RLS + user filter provide defense in depth.
-   */
-  const handleDeleteReview = async (id: string): Promise<MutationResult> => {
-    if (!authUserId) {
-      return { ok: false, error: 'You must be signed in to delete a review.' };
-    }
+  const handleDeleteReview = async (id: string): Promise<any> => {
+    if (!authUserId) return { ok: false, error: 'You must be signed in to delete a review.' };
 
     const { error } = await supabase
       .from('reviews')
@@ -397,11 +547,8 @@ export const App: React.FC = () => {
       .eq('id', id)
       .eq('user_id', authUserId);
 
-    if (error) {
-      return { ok: false, error: mapReviewMutationError(error) };
-    }
-
-    setReviews((prev) => prev.filter((r) => r.id !== id));
+    if (error) return { ok: false, error: mapReviewMutationError(error) };
+    setReviews((previous) => previous.filter((review) => review.id !== id));
     return { ok: true };
   };
 
@@ -437,26 +584,69 @@ export const App: React.FC = () => {
     );
   };
 
-   const handleAuthenticated = (name: string, _email: string) => {
-    setUser(prev => ({
-      ...prev,
-      name,
-      title: "Sorbonne Patristics Scholar",
-      location: "Paris Abbey"
-    }));
+  const handleAuthenticated = async () => {
+    const { data: { user: authUser }, error } = await supabase.auth.getUser();
+    if (error) {
+      console.error('Failed to get authenticated user:', error);
+      return;
+    }
+    if (authUser) {
+      setAuthUserId(authUser.id);
+      await loadProfile(authUser.id);
+    }
   };
 
-  const handleSignOut = async () => {
+    const handleSignOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error('Sign out failed:', error);
       showToast('Could not sign out');
       return;
     }
+    setAuthUserId(null);
     setUser(INITIAL_USER);
     setCurrentScreen('home');
     showToast('Signed out');
   };
+
+  // --- ADD THIS NEW FUNCTION HERE ---
+  const handleAvatarUpload = async (file: File) => {
+    if (!authUserId) {
+      showToast('You must be logged in');
+      return;
+    }
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${authUserId}-${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', authUserId);
+
+      if (updateError) throw updateError;
+
+      setUser(prev => ({ ...prev, avatar: publicUrl }));
+      showToast('Profile picture updated!');
+
+    } catch (error: any) {
+      console.error('Upload failed:', error);
+      showToast('Failed to upload image');
+    }
+  };
+  // ----------------------------------
+
   return (
     <div className="min-h-screen bg-theme-app text-theme-body relative flex flex-col font-sans antialiased selection:bg-theme-accent-light selection:text-theme-accent transition-colors duration-200">
       {toastMessage && (
@@ -621,6 +811,7 @@ export const App: React.FC = () => {
             books={books}
             currentUser={user}
             authUserId={authUserId}
+            reviewerProfiles={reviewerProfiles}
             targetReviewId={targetReviewId}
             onClearTargetReview={() => setTargetReviewId(null)}
             onAddReview={handleAddReview}
@@ -703,9 +894,10 @@ export const App: React.FC = () => {
         )}
 
         {currentScreen === 'profile' && (
-          <ProfileView
+            <ProfileView
             user={user}
             onUpdateUser={handleUpdateUser}
+            onAvatarUpload={handleAvatarUpload}
             onNavigate={(s) => {
               setCurrentScreen(s);
               window.scrollTo({ top: 0, behavior: 'smooth' });

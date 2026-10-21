@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAuthenticated: (name: string, email: string) => void;
+  onAuthenticated: () => void;
   onShowToast: (msg: string) => void;
 }
 
@@ -65,7 +65,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         // If email confirmation is off, session exists and user is logged in.
         if (data.session) {
-          onAuthenticated(name, email);
+          onAuthenticated();
           onShowToast(isAmharic ? `እንኳን ደህና መጡ፣ ${name}!` : `Welcome, ${name}!`);
           onClose();
         } else {
@@ -91,7 +91,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         const displayName =
           (data.user?.user_metadata as any)?.name || data.user?.email || 'Reader';
 
-        onAuthenticated(displayName, email);
+        onAuthenticated();
         onShowToast(isAmharic ? `እንኳን ደህና መጡ፣ ${displayName}!` : `Welcome back, ${displayName}!`);
         onClose();
       }
