@@ -903,10 +903,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
 
       {isWriteReviewOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
-          <form
-            onSubmit={handleSubmitReview}
-            className="w-full sm:max-w-lg bg-theme-surface rounded-t-2xl sm:rounded-2xl p-6 shadow-2xl border border-theme max-h-[90vh] overflow-y-auto"
-          >
+          <form onSubmit={handleSubmitReview} className="w-full sm:max-w-lg bg-theme-surface rounded-t-2xl sm:rounded-2xl p-6 shadow-2xl border border-theme max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-theme">
               <h3 className="font-serif text-lg font-bold text-theme-main">
                 {editingReview

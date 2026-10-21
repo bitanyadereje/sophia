@@ -21,7 +21,6 @@ CREATE TABLE public.discussion_posts (
     CONSTRAINT chk_parent_not_self CHECK (parent_id <> id)
 );
 
--- Query indexes
 CREATE INDEX idx_discussion_posts_book_id
 ON public.discussion_posts(book_id);
 
@@ -37,7 +36,6 @@ ON public.discussion_posts(book_id, created_at DESC)
 WHERE deleted_at IS NULL;
 
 
--- DISCUSSION POST ↔ TAG JUNCTION TABLE
 CREATE TABLE public.discussion_post_tags (
     post_id UUID NOT NULL
         REFERENCES public.discussion_posts(id) ON DELETE CASCADE,

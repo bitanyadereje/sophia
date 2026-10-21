@@ -26,6 +26,7 @@ type MutationResult = {
 // These will be replaced by Supabase fetches as features are built.
 // ============================================================
 const INITIAL_USER: UserProfile = {
+  id: '',
   name: '',
   title: '',
   location: '',
