@@ -1,15 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Review, ScreenId, UserProfile } from '../types';
+import { Book, Review, ScreenId, UserProfile } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 
 interface ReviewsViewProps {
   reviews: Review[];
+  books: Book[];
   currentUser?: UserProfile;
+  authUserId: string | null;
   targetReviewId?: string | null;
   onClearTargetReview?: () => void;
-  onAddReview: (review: Review) => void;
-  onUpdateReview?: (id: string, updated: Partial<Review>) => void;
-  onDeleteReview?: (id: string) => void;
+  onAddReview: (input: {
+    book_id: string;
+    title?: string | null;
+    content: string;
+    rating: number;
+    quote?: string | null;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  onUpdateReview?: (id: string, updated: Partial<Review>) => Promise<{ ok: boolean; error?: string }>;
+  onDeleteReview?: (id: string) => Promise<{ ok: boolean; error?: string }>;
   onSelectBook?: (bookId: string) => void;
   onSelectReview?: (reviewId: string) => void;
   onNavigate: (screen: ScreenId) => void;
@@ -18,7 +26,9 @@ interface ReviewsViewProps {
 
 export const ReviewsView: React.FC<ReviewsViewProps> = ({
   reviews,
+  books,
   currentUser,
+  authUserId,
   targetReviewId,
   onClearTargetReview,
   onAddReview,
@@ -74,7 +84,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const [newFullReview, setNewFullReview] = useState('');
 
   const traditions = ['All', 'Patristic', 'Orthodox', 'Scholastic', 'Soteriology'];
-  const isAuthor = (r: Review) => Boolean(currentUser?.name && r.user_id === currentUser.name);
+  const isAuthor = (r: Review) => Boolean(authUserId && r.user_id === authUserId);
 
   const handleToggleLike = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -111,8 +121,13 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   };
 
   const handleOpenNewReview = () => {
+    if (!authUserId) {
+      onShowToast('Please sign in to write a review.');
+      return;
+    }
+
     setEditingReview(null);
-    setNewBookId('');
+    setNewBookId(books[0]?.id || '');
     setNewRating(5.0);
     setNewQuote('');
     setNewFullReview('');
@@ -133,14 +148,21 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     setIsWriteReviewOpen(true);
   };
 
-  const handleDeleteReview = (id: string, e: React.MouseEvent) => {
+  const handleDeleteReview = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const target = reviews.find(item => item.id === id);
     if (target && !isAuthor(target)) {
       onShowToast('You can only delete reviews you have written.');
       return;
     }
-    onDeleteReview?.(id);
+
+    if (!onDeleteReview) return;
+    const result = await onDeleteReview(id);
+    if (!result.ok) {
+      onShowToast(result.error || 'Could not delete review');
+      return;
+    }
+
     onShowToast('Review deleted');
   };
 
@@ -152,21 +174,51 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       r.user_id.toLowerCase().includes(q) || (r.quote || '').toLowerCase().includes(q) || r.content.toLowerCase().includes(q);
   });
 
-  const handleSubmitReview = (e: React.FormEvent) => {
+  const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newBookId.trim() || !newQuote.trim()) return;
-    const values = { book_id: newBookId, rating: newRating, quote: newQuote, content: newFullReview.trim() || newQuote.trim() };
+
+    if (!authUserId) {
+      onShowToast('Please sign in to publish a review.');
+      return;
+    }
+
+    if (!newBookId.trim()) {
+      onShowToast('Please choose a book.');
+      return;
+    }
+
+    if (!Number.isFinite(newRating) || newRating < 1 || newRating > 5) {
+      onShowToast('Rating must be between 1 and 5.');
+      return;
+    }
+
+    const content = (newFullReview.trim() || newQuote.trim()).trim();
+    if (!content) {
+      onShowToast('Please provide review content or a key quote.');
+      return;
+    }
+
+    const values = {
+      book_id: newBookId,
+      rating: Math.round(newRating),
+      quote: newQuote.trim() || null,
+      content,
+      title: null,
+    };
+
     if (editingReview && onUpdateReview) {
-      onUpdateReview(editingReview.id, values);
+      const result = await onUpdateReview(editingReview.id, values);
+      if (!result.ok) {
+        onShowToast(result.error || 'Could not update review');
+        return;
+      }
       onShowToast('Review updated');
     } else {
-      if (!currentUser) return;
-      const now = new Date().toISOString();
-      const created: Review = {
-        id: `rev-${Date.now()}`, user_id: currentUser.name, ...values, title: null,
-        created_at: now, updated_at: now
-      };
-      onAddReview(created);
+      const result = await onAddReview(values);
+      if (!result.ok) {
+        onShowToast(result.error || 'Could not publish review');
+        return;
+      }
       onShowToast('Review published');
     }
     setNewBookId('');
@@ -196,6 +248,14 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
             <span>{isAmharic ? 'መጽሐፍ ዳሰሳ ጻፍ' : 'Write Review'}</span>
           </button>
         </div>
+
+        {!authUserId && (
+          <div className="p-3 rounded-xl bg-theme-subtle border border-theme text-xs text-theme-muted">
+            {isAmharic
+              ? 'የመጽሐፍ ዳሰሳ ለመጻፍ ወይም ለማስተካከል እባክዎ ይግቡ።'
+              : 'Sign in to create, edit, or delete your own reviews.'}
+          </div>
+        )}
 
         {/* Target Review Focused Banner */}
         {targetReviewId && (
@@ -564,14 +624,35 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1">
-                    {isAmharic ? 'የመጽሐፍ ርዕስ' : 'Book Title'}
+                    {isAmharic ? 'መጽሐፍ' : 'Book'}
                   </label>
-                  <input
-                    type="text"
+                  <select
                     required
                     value={newBookId}
                     onChange={(e) => setNewBookId(e.target.value)}
-                    placeholder="e.g. Confessions, De Trinitate"
+                    className="w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
+                  >
+                    <option value="">{isAmharic ? 'መጽሐፍ ይምረጡ' : 'Select a book'}</option>
+                    {books.map((book) => (
+                      <option key={book.id} value={book.id}>
+                        {book.title} ({book.id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1">
+                    {isAmharic ? 'ደረጃ (1-5)' : 'Rating (1-5)'}
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    step={1}
+                    required
+                    value={newRating}
+                    onChange={(e) => setNewRating(Number(e.target.value))}
                     className="w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
                   />
                 </div>

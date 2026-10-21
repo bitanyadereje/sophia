@@ -16,6 +16,11 @@ import { AuthModal } from './components/AuthModal';
 import { SearchModal } from './components/SearchModal';
 import { supabase } from './lib/supabase';
 
+type MutationResult = {
+  ok: boolean;
+  error?: string;
+};
+
 // ============================================================
 // Temporary empty defaults (mock data files were deleted)
 // These will be replaced by Supabase fetches as features are built.
@@ -50,6 +55,7 @@ export const App: React.FC = () => {
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
   const [notes, setNotes] = useState<Note[]>(INITIAL_NOTES);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(INITIAL_BOOKMARKS);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
 
   // Fetch books from Supabase on mount
   useEffect(() => {
@@ -64,6 +70,69 @@ export const App: React.FC = () => {
         setBooks((data ?? []) as Book[]);
       });
   }, []);
+
+  /**
+   * Load reviews from Supabase.
+   * Public SELECT is allowed by RLS, so this works for guests and members.
+   */
+  const loadReviews = async () => {
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Failed to load reviews:', error);
+      return;
+    }
+
+    setReviews((data ?? []) as Review[]);
+  };
+
+  useEffect(() => {
+    loadReviews();
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const syncAuthUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!mounted) return;
+      setAuthUserId(data.user?.id ?? null);
+    };
+
+    syncAuthUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUserId(session?.user?.id ?? null);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const mapReviewMutationError = (error: any): string => {
+    const code = error?.code;
+
+    if (code === '23505') {
+      return 'You already reviewed this book. Edit your existing review instead.';
+    }
+
+    if (code === '23503') {
+      return 'Invalid book. Please select a valid book from the catalog.';
+    }
+
+    if (code === '42501') {
+      return 'Permission denied. Please sign in and try again.';
+    }
+
+    return error?.message || 'Unexpected database error.';
+  };
 
   // Sync theme with DOM data-theme attribute
   useEffect(() => {
@@ -245,16 +314,95 @@ export const App: React.FC = () => {
     setColloquiumComments(prev => [...prev, c]);
   };
 
-  const handleAddReview = (r: Review) => {
-    setReviews(prev => [r, ...prev]);
+  /**
+   * Create a review using authenticated user UUID + real book UUID.
+   */
+  const handleAddReview = async (input: {
+    book_id: string;
+    title?: string | null;
+    content: string;
+    rating: number;
+    quote?: string | null;
+  }): Promise<MutationResult> => {
+    if (!authUserId) {
+      return { ok: false, error: 'You must be signed in to publish a review.' };
+    }
+
+    const payload = {
+      user_id: authUserId,
+      book_id: input.book_id,
+      title: input.title ?? null,
+      content: input.content,
+      rating: input.rating,
+      quote: input.quote ?? null,
+    };
+
+    const { data, error } = await supabase
+      .from('reviews')
+      .insert(payload)
+      .select('*')
+      .single();
+
+    if (error) {
+      return { ok: false, error: mapReviewMutationError(error) };
+    }
+
+    setReviews((prev) => [data as Review, ...prev]);
+    return { ok: true };
   };
 
-  const handleUpdateReview = (id: string, updated: Partial<Review>) => {
-    setReviews(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
+  /**
+   * Update only caller-owned review rows. RLS enforces ownership server-side.
+   */
+  const handleUpdateReview = async (
+    id: string,
+    updated: Partial<Review>
+  ): Promise<MutationResult> => {
+    if (!authUserId) {
+      return { ok: false, error: 'You must be signed in to edit a review.' };
+    }
+
+    const patch = {
+      ...updated,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from('reviews')
+      .update(patch)
+      .eq('id', id)
+      .eq('user_id', authUserId)
+      .select('*')
+      .single();
+
+    if (error) {
+      return { ok: false, error: mapReviewMutationError(error) };
+    }
+
+    setReviews((prev) => prev.map((r) => (r.id === id ? (data as Review) : r)));
+    return { ok: true };
   };
 
-  const handleDeleteReview = (id: string) => {
-    setReviews(prev => prev.filter(r => r.id !== id));
+  /**
+   * Delete only caller-owned review rows. RLS + user filter provide defense in depth.
+   */
+  const handleDeleteReview = async (id: string): Promise<MutationResult> => {
+    if (!authUserId) {
+      return { ok: false, error: 'You must be signed in to delete a review.' };
+    }
+
+    const { error } = await supabase
+      .from('reviews')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', authUserId);
+
+    if (error) {
+      return { ok: false, error: mapReviewMutationError(error) };
+    }
+
+    setReviews((prev) => prev.filter((r) => r.id !== id));
+    return { ok: true };
   };
 
   const handleAddNote = (n: Note) => {
@@ -470,7 +618,9 @@ export const App: React.FC = () => {
         {currentScreen === 'reviews' && (
           <ReviewsView
             reviews={reviews}
+            books={books}
             currentUser={user}
+            authUserId={authUserId}
             targetReviewId={targetReviewId}
             onClearTargetReview={() => setTargetReviewId(null)}
             onAddReview={handleAddReview}
