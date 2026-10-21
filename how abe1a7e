@@ -1,0 +1,23 @@
+[33mabe1a7e[m[33m ([m[1;36mHEAD -> [m[1;32mreviews[m[33m)[m HEAD@{0}: pull origin main (finish): returning to refs/heads/reviews
+[33mabe1a7e[m[33m ([m[1;36mHEAD -> [m[1;32mreviews[m[33m)[m HEAD@{1}: pull origin main (pick): initial review operations
+[33m9cfac73[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m HEAD@{2}: pull origin main (start): checkout 9cfac73af9fae81ecd4dcd8b606d106ff79cdc36
+[33md55fe32[m HEAD@{3}: pull origin main (finish): returning to refs/heads/reviews
+[33md55fe32[m HEAD@{4}: pull origin main (pick): initial review operations
+[33m18f5122[m[33m ([m[1;32mmain[m[33m)[m HEAD@{5}: pull origin main (start): checkout 18f5122cf7e4aff80f9c03c18cb35522962badbf
+[33m533205a[m HEAD@{6}: checkout: moving from main to reviews
+[33m18f5122[m[33m ([m[1;32mmain[m[33m)[m HEAD@{7}: pull origin main: Fast-forward
+[33m8e838ab[m HEAD@{8}: checkout: moving from reviews to main
+[33m533205a[m HEAD@{9}: commit: initial review operations
+[33m8e838ab[m HEAD@{10}: checkout: moving from main to reviews
+[33m8e838ab[m HEAD@{11}: commit: enforced RLS olicies on the database tables
+[33m10105a2[m HEAD@{12}: pull origin main: Fast-forward
+[33m1dded28[m HEAD@{13}: commit: feat: enabled RLS for the db tables
+[33md83b232[m HEAD@{14}: commit: feat(db): add user library, reading paths, and saved content schema
+[33m38a7ce1[m HEAD@{15}: commit: feat(db): add discussion threads and user reviews schema
+[33m8bd85bb[m HEAD@{16}: commit: feat(db): initialize supabase config and core books catalog
+[33m9165d42[m HEAD@{17}: reset: moving to HEAD
+[33m9165d42[m HEAD@{18}: pull origin main: Fast-forward
+[33m7db37b3[m HEAD@{19}: pull origin main: Fast-forward
+[33m79fb0f2[m HEAD@{20}: commit: update readme
+[33m1bb34d7[m HEAD@{21}: commit: feat:frontend codebase
+[33md302b10[m HEAD@{22}: clone: from https://github.com/bitanyadereje/sophia.git

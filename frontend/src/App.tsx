@@ -16,6 +16,11 @@ import { AuthModal } from './components/AuthModal';
 import { SearchModal } from './components/SearchModal';
 import { supabase } from './lib/supabase';
 
+type MutationResult = {
+  ok: boolean;
+  error?: string;
+};
+
 // ============================================================
 // Temporary empty defaults (mock data files were deleted)
 // These will be replaced by Supabase fetches as features are built.
@@ -51,6 +56,39 @@ export const App: React.FC = () => {
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
   const [notes, setNotes] = useState<Note[]>(INITIAL_NOTES);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(INITIAL_BOOKMARKS);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [reviewerProfiles, setReviewerProfiles] = useState<Record<string, { name?: string | null; username?: string | null; avatar_url?: string | null; avatar?: string | null; title?: string | null }>>({});
+
+  const loadReviewerProfilesForReviews = async (reviewList: Review[]) => {
+    const reviewerIds = [...new Set(reviewList.map((review) => review.user_id).filter(Boolean))];
+
+    if (reviewerIds.length === 0) {
+      setReviewerProfiles({});
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, name, username, avatar_url')
+      .in('id', reviewerIds);
+
+    if (error) {
+      console.error('Failed to load reviewer profiles:', error);
+      return;
+    }
+
+    const nextProfiles = (data ?? []).reduce<Record<string, { name?: string | null; username?: string | null; avatar_url?: string | null; avatar?: string | null; title?: string | null }>>((acc, profile) => {
+      acc[profile.id] = {
+        name: profile.name,
+        username: profile.username,
+        avatar_url: profile.avatar_url,
+        avatar: profile.avatar_url,
+      };
+      return acc;
+    }, {});
+
+    setReviewerProfiles(nextProfiles);
+  };
 
   const loadProfile = async (userId: string) => {
     const { data, error } = await supabase
@@ -63,14 +101,20 @@ export const App: React.FC = () => {
       console.error('Failed to load profile:', error);
       return;
     }
+
     if (!data) {
-      setUser(prev => ({ ...prev, id: userId }));
+      const { data: authData } = await supabase.auth.getUser();
+      const fallbackName = authData.user?.user_metadata?.name || authData.user?.email || 'Reader';
+      setUser(prev => ({
+        ...prev,
+        name: fallbackName,
+        avatar: '',
+      }));
       return;
     }
 
     setUser(prev => ({
       ...prev,
-      id: data.id,
       name: data.name || data.username || 'Reader',
       avatar: data.avatar_url || '',
     }));
@@ -85,12 +129,15 @@ export const App: React.FC = () => {
 
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) console.error('Failed to load auth session:', error);
+      setAuthUserId(session?.user?.id ?? null);
       if (session?.user) void loadCurrentProfile(session.user.id);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        void loadCurrentProfile(session.user.id);
+      const userId = session?.user?.id ?? null;
+      setAuthUserId(userId);
+      if (userId) {
+        void loadCurrentProfile(userId);
       } else if (isMounted) {
         setUser(INITIAL_USER);
       }
@@ -210,16 +257,16 @@ export const App: React.FC = () => {
     setUser(prev => ({ ...prev, ...updated }));
 
     // 2. If logged in, save to Supabase
-    if (user?.id) {
+    const targetUserId = authUserId;
+    if (targetUserId) {
       try {
         const { error } = await supabase
           .from('profiles')
           .update({
             name: updated.name,
             avatar_url: updated.avatar,
-            // Add other fields here if you add them to the UI later
           })
-          .eq('id', user.id);
+          .eq('id', targetUserId);
 
         if (error) throw error;
       } catch (error) {
@@ -229,31 +276,100 @@ export const App: React.FC = () => {
     }
   };
 
-  // ADD THE NEW FUNCTION HERE
-  const handleAddBook = async (newBookData: { title: string; author_name: string }) => {
-    if (!user || !user.name) {
-      showToast('You must be logged in to add a book');
-      return;
+  /**
+   * Resolve a book to one canonical row. Both review creation and any future
+   * reading-path book picker should use this function rather than inserting
+   * books independently. This currently matches normalized title + author;
+   * a bibliographic search/selection UI should supply verified metadata before
+   * creation where available.
+   */
+  type BookInput = {
+    book_id?: string;
+    bookTitle?: string;
+    bookAuthor?: string;
+    title?: string;
+    author_name?: string;
+    language?: string;
+    cover_url?: string | null;
+    page_count?: number | null;
+  };
+
+  const normalizeBookText = (value: string | null | undefined) =>
+    (value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+
+  const findOrCreateBook = async (input: BookInput): Promise<Book> => {
+    if (!authUserId) throw new Error('You must be signed in to add a new book.');
+
+    // If the UI selected a canonical book, validate that it still exists.
+    if (input.book_id) {
+      const existing = books.find((book) => book.id === input.book_id);
+      if (existing) return existing;
+
+      const { data, error } = await supabase
+        .from('books')
+        .select('*')
+        .eq('id', input.book_id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error('That book could not be found. Search the catalog again.');
+      const found = data as Book;
+      setBooks((previous) => previous.some((book) => book.id === found.id) ? previous : [found, ...previous]);
+      return found;
     }
 
-    const { data, error } = await supabase
+    const title = (input.bookTitle ?? input.title ?? '').trim();
+    const author = (input.bookAuthor ?? input.author_name ?? '').trim();
+    if (!title || !author) throw new Error('A book title and author are required.');
+
+    // Query the database, not just React state, so a stale local list is less
+    // likely to cause a duplicate when another user has already added the book.
+    const { data: existingBooks, error: searchError } = await supabase
+      .from('books')
+      .select('*');
+    if (searchError) throw searchError;
+
+    const match = (existingBooks ?? []).find((book: Book) =>
+      normalizeBookText(book.title) === normalizeBookText(title) &&
+      normalizeBookText(book.author_name) === normalizeBookText(author)
+    ) as Book | undefined;
+
+    if (match) {
+      setBooks((previous) => previous.some((book) => book.id === match.id) ? previous : [match, ...previous]);
+      return match;
+    }
+
+    // New user-submitted records remain unverified. Do not mark a book verified
+    // just because a user entered its title and author.
+    const { data: created, error: createError } = await supabase
       .from('books')
       .insert({
-        title: newBookData.title,
-        author_name: newBookData.author_name,
-        language: 'en',
+        title,
+        author_name: author,
+        language: input.language ?? 'en',
+        cover_url: input.cover_url ?? null,
+        page_count: input.page_count ?? null,
+        verification_status: 'unverified',
+        created_by: authUserId,
       })
-      .select()
+      .select('*')
       .single();
 
-    if (error) {
-      console.error('Failed to add book:', error);
-      showToast('Could not add book');
-      return;
-    }
+    if (createError) throw createError;
+    const createdBook = created as Book;
+    setBooks((previous) => previous.some((book) => book.id === createdBook.id) ? previous : [createdBook, ...previous]);
+    return createdBook;
+  };
 
-    setBooks(prev => [data as Book, ...prev]);
-    showToast('Book added successfully!');
+  const handleAddBook = async (newBookData: { title: string; author_name: string }) => {
+    try {
+      const book = await findOrCreateBook(newBookData);
+      showToast(book.verification_status === 'verified' ? 'Book found in catalog.' : 'Book found or submitted for verification.');
+      return book;
+    } catch (error) {
+      console.error('Failed to find or add book:', error);
+      showToast(error instanceof Error ? error.message : 'Could not add book.');
+      return null;
+    }
   };
 
   const handleUpdateBookStatus = (
@@ -346,67 +462,95 @@ export const App: React.FC = () => {
   const handleAddComment = (c: DialecticComment) => {
     setColloquiumComments(prev => [...prev, c]);
   };
-  const handleAddReview = async (data: Review | { bookTitle: string; bookAuthor: string; rating: number; quote: string; content: string }) => {
-    if (!user.id) {
-      showToast('You must be logged in');
-      throw new Error('No user ID');
+  const mapReviewMutationError = (error: any): string => {
+    if (error?.code === '23505') return 'You already reviewed this book. Edit your existing review instead.';
+    if (error?.code === '23503') return 'The selected book is no longer available. Search the catalog again.';
+    if (error?.code === '42501') return 'Permission denied. Please sign in and try again.';
+    return error?.message || 'Unexpected database error.';
+  };
+
+  /** Resolves the selected or manually entered book, then persists its review. */
+  const handleAddReview = async (data: any): Promise<any> => {
+    if (!authUserId) return { ok: false, error: 'You must be signed in to publish a review.' };
+    if (typeof data.content !== 'string' || !data.content.trim()) {
+      return { ok: false, error: 'Please write a detailed review.' };
+    }
+    if (!Number.isInteger(data.rating) || data.rating < 1 || data.rating > 5) {
+      return { ok: false, error: 'Rating must be between 1 and 5.' };
     }
 
-    const bookTitle = 'bookTitle' in data ? data.bookTitle : data.title || '';
-    let book = 'book_id' in data
-      ? books.find(item => item.id === data.book_id)
-      : books.find(
-        item => item.title.trim().toLowerCase() === data.bookTitle.trim().toLowerCase()
-          && item.author_name.trim().toLowerCase() === data.bookAuthor.trim().toLowerCase()
-      );
+    try {
+      const book = await findOrCreateBook({
+        book_id: data.book_id,
+        bookTitle: data.bookTitle,
+        bookAuthor: data.bookAuthor,
+        title: data.title,
+        author_name: data.author_name,
+        language: data.language,
+        cover_url: data.cover_url,
+        page_count: data.page_count,
+      });
 
-    if (!book) {
-      if ('book_id' in data) {
-        throw new Error('Book for this review was not found');
-      }
-      const { data: createdBook, error: bookError } = await supabase
-        .from('books')
-        .insert({ title: data.bookTitle.trim(), author_name: data.bookAuthor.trim(), language: 'en' })
+      const { data: newReview, error } = await supabase
+        .from('reviews')
+        .insert({
+          user_id: authUserId,
+          book_id: book.id,
+          title: data.reviewTitle ?? (data.book_id ? data.title ?? null : null),
+          content: data.content,
+          rating: data.rating,
+          quote: data.quote || null,
+        })
         .select('*')
         .single();
 
-      if (bookError) {
-        console.error('Failed to find or create review book:', bookError);
-        showToast('Could not find or create book');
-        throw bookError;
-      }
-      book = createdBook as Book;
-      setBooks(prev => [...prev, book as Book]);
+      if (error) return { ok: false, error: mapReviewMutationError(error) };
+      setReviews((previous) => [newReview as Review, ...previous]);
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : mapReviewMutationError(error);
+      return { ok: false, error: message };
     }
-    
-    const { data: newReview, error } = await supabase
+  };
+
+  /** Persist edits; RLS and the user_id filter both enforce ownership. */
+  const handleUpdateReview = async (id: string, updated: Partial<Review>): Promise<any> => {
+    if (!authUserId) return { ok: false, error: 'You must be signed in to edit a review.' };
+
+    // Only allow review fields to be changed from this handler.
+    const patch: Partial<Review> & { updated_at: string } = {
+      ...(updated.title !== undefined ? { title: updated.title } : {}),
+      ...(updated.content !== undefined ? { content: updated.content } : {}),
+      ...(updated.rating !== undefined ? { rating: updated.rating } : {}),
+      ...(updated.quote !== undefined ? { quote: updated.quote } : {}),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
       .from('reviews')
-      .insert({
-        book_id: book.id,
-        user_id: user.id,
-        title: bookTitle.trim() || null,
-        content: data.content,
-        rating: data.rating,
-        quote: data.quote || null,
-      })
-      .select()
+      .update(patch)
+      .eq('id', id)
+      .eq('user_id', authUserId)
+      .select('*')
       .single();
 
-    if (error) {
-      console.error('4. SUPABASE ERROR:', error);
-      showToast('Database error: ' + error.message);
-      throw error;
-    }
-
-    setReviews(prev => [newReview as Review, ...prev]);
-  };
-  
-  const handleUpdateReview = (id: string, updated: Partial<Review>) => {
-    setReviews(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
+    if (error) return { ok: false, error: mapReviewMutationError(error) };
+    setReviews((previous) => previous.map((review) => review.id === id ? data as Review : review));
+    return { ok: true };
   };
 
-  const handleDeleteReview = (id: string) => {
-    setReviews(prev => prev.filter(r => r.id !== id));
+  const handleDeleteReview = async (id: string): Promise<any> => {
+    if (!authUserId) return { ok: false, error: 'You must be signed in to delete a review.' };
+
+    const { error } = await supabase
+      .from('reviews')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', authUserId);
+
+    if (error) return { ok: false, error: mapReviewMutationError(error) };
+    setReviews((previous) => previous.filter((review) => review.id !== id));
+    return { ok: true };
   };
 
   const handleAddNote = (n: Note) => {
@@ -441,13 +585,16 @@ export const App: React.FC = () => {
     );
   };
 
-  const handleAuthenticated = async (_name: string, _email: string) => {
+  const handleAuthenticated = async () => {
     const { data: { user: authUser }, error } = await supabase.auth.getUser();
     if (error) {
       console.error('Failed to get authenticated user:', error);
       return;
     }
-    if (authUser) await loadProfile(authUser.id);
+    if (authUser) {
+      setAuthUserId(authUser.id);
+      await loadProfile(authUser.id);
+    }
   };
 
     const handleSignOut = async () => {
@@ -457,6 +604,7 @@ export const App: React.FC = () => {
       showToast('Could not sign out');
       return;
     }
+    setAuthUserId(null);
     setUser(INITIAL_USER);
     setCurrentScreen('home');
     showToast('Signed out');
@@ -464,37 +612,32 @@ export const App: React.FC = () => {
 
   // --- ADD THIS NEW FUNCTION HERE ---
   const handleAvatarUpload = async (file: File) => {
-    if (!user || !user.id) {
+    if (!authUserId) {
       showToast('You must be logged in');
       return;
     }
 
     try {
-      // 1. Create a unique file path (userId + timestamp)
       const fileExt = file.name.split('.').pop();
-      const filePath = `${user.id}-${Date.now()}.${fileExt}`;
+      const filePath = `${authUserId}-${Date.now()}.${fileExt}`;
 
-      // 2. Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
 
-      // 3. Get the public URL
       const { data: { publicUrl } } = supabase.storage
         .from('avatars')
         .getPublicUrl(filePath);
 
-      // 4. Save URL to the user's profile in the database
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ avatar_url: publicUrl })
-        .eq('id', user.id);
+        .eq('id', authUserId);
 
       if (updateError) throw updateError;
 
-      // 5. Update local state so the UI changes instantly
       setUser(prev => ({ ...prev, avatar: publicUrl }));
       showToast('Profile picture updated!');
 
@@ -666,7 +809,10 @@ export const App: React.FC = () => {
         {currentScreen === 'reviews' && (
           <ReviewsView
             reviews={reviews}
+            books={books}
             currentUser={user}
+            authUserId={authUserId}
+            reviewerProfiles={reviewerProfiles}
             targetReviewId={targetReviewId}
             onClearTargetReview={() => setTargetReviewId(null)}
             onAddReview={handleAddReview}
