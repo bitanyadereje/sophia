@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Review, ScreenId, UserProfile } from '../types';
+import { Review, ReviewComment, ReviewLike, ScreenId, UserProfile } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 
 interface ReviewsViewProps {
   reviews: Review[];
+  reviewLikes: ReviewLike[];
+  reviewComments: ReviewComment[];
   currentUser?: UserProfile;
   targetReviewId?: string | null;
   onClearTargetReview?: () => void;
   onAddReview: (data: { bookTitle: string; bookAuthor: string; rating: number; quote: string; content: string }) => Promise<void>;
+  onToggleLike: (reviewId: string) => Promise<void>;
+  onAddComment: (reviewId: string, content: string) => Promise<void>;
   onUpdateReview?: (id: string, updated: Partial<Review>) => void;
   onDeleteReview?: (id: string) => void;
   onSelectBook?: (bookId: string) => void;
@@ -18,10 +22,14 @@ interface ReviewsViewProps {
 
 export const ReviewsView: React.FC<ReviewsViewProps> = ({
   reviews,
+  reviewLikes,
+  reviewComments,
   currentUser,
   targetReviewId,
   onClearTargetReview,
   onAddReview,
+  onToggleLike,
+  onAddComment,
   onUpdateReview,
   onDeleteReview,
   onSelectBook,
@@ -39,7 +47,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
-  const [localCommentsList, setLocalCommentsList] = useState<Record<string, { id: string; author: string; text: string; timeAgo: string }[]>>({});
 
   useEffect(() => {
     const handleDocumentClick = () => setActiveMenuId(null);
@@ -73,7 +80,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
 
   const handleToggleLike = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    onShowToast('Likes are not available here yet');
+    void onToggleLike(id);
   };
 
   const handleToggleSave = (id: string, e: React.MouseEvent) => {
@@ -88,15 +95,21 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     setActiveCommentId(prev => (prev === id ? null : id));
   };
 
-  const handleAddComment = (reviewId: string, e: React.FormEvent) => {
+  const handleAddComment = async (reviewId: string, e: React.FormEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const text = commentInputs[reviewId]?.trim();
     if (!text) return;
-    const newComment = { id: `comm-${Date.now()}`, author: currentUser?.name || 'Reader', text, timeAgo: 'Just now' };
-    setLocalCommentsList(prev => ({ ...prev, [reviewId]: [...(prev[reviewId] || []), newComment] }));
-    setCommentInputs(prev => ({ ...prev, [reviewId]: '' }));
-    onShowToast('Comment posted to review');
+    if (!currentUser?.id) {
+      onShowToast('Sign in to comment on reviews');
+      return;
+    }
+    try {
+      await onAddComment(reviewId, text);
+      setCommentInputs(prev => ({ ...prev, [reviewId]: '' }));
+    } catch {
+      // The parent reports the Supabase error and leaves the draft in place.
+    }
   };
 
   const handleCardClick = (rev: Review) => {
@@ -242,10 +255,10 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
         {/* Reviews Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredReviews.map((rev) => {
-            const isLiked = false;
-            const likesCount = 0;
+            const isLiked = reviewLikes.some(like => like.review_id === rev.id && like.user_id === currentUser?.id);
+            const likesCount = reviewLikes.filter(like => like.review_id === rev.id).length;
             const isSaved = savedReviews[rev.id] ?? false;
-            const comments = localCommentsList[rev.id] || [];
+            const comments = reviewComments.filter(comment => comment.review_id === rev.id);
             const isCommentDrawerOpen = activeCommentId === rev.id;
 
             return (
@@ -332,13 +345,13 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
 
                 <div className="pt-3 border-t border-theme/50 flex flex-col gap-2">
                    <div className="flex items-center justify-between w-full text-xs text-theme-muted">
-                    <button type="button" onClick={(e) => handleToggleLike(rev.id, e)} className="flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle transition-colors cursor-pointer hover:text-theme-main">
-                      <span className="material-symbols-outlined text-[16px]">favorite</span>
-                      <span className="font-sans tabular-nums">0</span>
+                    <button type="button" onClick={(e) => handleToggleLike(rev.id, e)} className={`flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle transition-colors cursor-pointer ${isLiked ? 'text-red-600' : 'hover:text-theme-main'}`}>
+                      <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0" }}>favorite</span>
+                      <span className="font-sans tabular-nums">{likesCount}</span>
                     </button>
                     <button type="button" onClick={(e) => handleToggleCommentDrawer(rev.id, e)} className={`flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle transition-colors cursor-pointer ${isCommentDrawerOpen ? 'text-theme-accent font-semibold' : 'hover:text-theme-main'}`}>
                       <span className="material-symbols-outlined text-[16px]">chat_bubble_outline</span>
-                      <span className="font-sans">{comments.length > 0 ? `${comments.length} Comments` : 'Comment'}</span>
+                      <span className="font-sans">{comments.length > 0 ? `${comments.length} ${isAmharic ? 'አስተያየቶች' : 'Comments'}` : (isAmharic ? 'አስተያየት' : 'Comment')}</span>
                     </button>
                     <button type="button" onClick={(e) => handleToggleSave(rev.id, e)} className={`flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle transition-colors cursor-pointer ${isSaved ? 'text-theme-accent font-semibold' : 'hover:text-theme-main'}`}>
                       <span className="material-symbols-outlined text-[16px]">bookmark</span>
@@ -353,10 +366,10 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                           {comments.map((c) => (
                             <div key={c.id} className="bg-theme-subtle/80 rounded-lg p-2 text-xs">
                               <div className="flex items-center justify-between text-[10px] text-theme-muted mb-0.5">
-                                <span className="font-semibold text-theme-main">{c.author}</span>
-                                <span>{c.timeAgo}</span>
+                                <span className="font-semibold text-theme-main">{c.user_id === currentUser?.id ? currentUser.name : 'Reader'}</span>
+                                <span>{new Date(c.created_at).toLocaleDateString(isAmharic ? 'am-ET' : 'en')}</span>
                               </div>
-                              <p className="text-theme-body font-serif">{c.text}</p>
+                              <p className="text-theme-body font-serif">{c.content}</p>
                             </div>
                           ))}
                         </div>
