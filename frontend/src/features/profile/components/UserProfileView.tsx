@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Review, ScreenId, UserProfile } from '../types';
-import { useLanguage } from '../context/LanguageContext';
+import { Review, ScreenId, UserProfile } from '../../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface UserProfileViewProps {
   user: UserProfile;

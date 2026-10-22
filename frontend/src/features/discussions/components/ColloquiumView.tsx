@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Book, DialecticComment, ScreenId } from '../types';
-import { useLanguage } from '../context/LanguageContext';
+import { Book, DialecticComment, ScreenId } from '../../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface ColloquiumViewProps {
   book?: Book;

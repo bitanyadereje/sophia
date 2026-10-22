@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Book, Note, Review, ScreenId, UserProfile, ReadingStatus, Question } from '../types';
-import { useLanguage } from '../context/LanguageContext';
+import { Book, Note, Review, ScreenId, UserProfile, ReadingStatus, Question } from '../../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface BookDetailViewProps {
   book: Book;

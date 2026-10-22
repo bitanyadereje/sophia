@@ -1,6 +1,6 @@
 ﻿import React, { useState } from 'react';
-import { Book, Bookmark, Note, ReadingStatus, ScreenId } from '../types';
-import { useLanguage } from '../context/LanguageContext';
+import { Book, Bookmark, Note, ReadingStatus, ScreenId } from '../../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface SavedViewProps {
   bookmarks: Bookmark[];

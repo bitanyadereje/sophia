@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Review, UserProfile, Book, ScreenId } from '../types';
-import { useLanguage } from '../context/LanguageContext';
+import { Review, UserProfile, Book, ScreenId } from '../../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface ReviewDetailViewProps {
   review: Review;
