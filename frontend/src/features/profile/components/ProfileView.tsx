@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { UserProfile, ScreenId, ThemeMode } from '../types';
-import { THEMES_LIST } from '../data/themes';
+import { UserProfile, ScreenId, ThemeMode } from '../../../types';
+import { THEMES_LIST } from '../../../data/themes';
 import { Check } from 'lucide-react';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface ProfileViewProps {
   user: UserProfile;

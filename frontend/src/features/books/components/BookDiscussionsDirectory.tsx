@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Book, ScreenId } from '../types';
-import { useLanguage } from '../context/LanguageContext';
+import { Book, ScreenId } from '../../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface BookDiscussionsDirectoryProps {
   books: Book[];

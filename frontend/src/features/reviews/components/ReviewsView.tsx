@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
-import { Book, Review, ScreenId, UserProfile } from '../types';
-import { useLanguage } from '../context/LanguageContext';
+import { Book, Review, ScreenId, UserProfile } from '../../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface ReviewerProfile {
   name?: string | null;

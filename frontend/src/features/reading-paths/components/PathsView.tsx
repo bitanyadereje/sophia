@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { ReadingPath, ScreenId } from '../types';
-import { useLanguage } from '../context/LanguageContext';
+import { ReadingPath, ScreenId } from '../../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface PathsViewProps {
   paths: ReadingPath[];

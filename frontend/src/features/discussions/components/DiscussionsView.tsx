@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Question, QuestionReply, ScreenId, UserProfile } from '../types';
-import { useLanguage } from '../context/LanguageContext';
+import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface DiscussionsViewProps {
   questions: Question[];
