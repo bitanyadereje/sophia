@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase';
-import { Review } from '../../types';
+import { Review, UserProfile } from '../../types';
 
 export const loadReviews = async (): Promise<Review[]> => {
   const { data, error } = await supabase.from('reviews').select('*').order('created_at', { ascending: false });
@@ -36,4 +36,21 @@ export const updateReview = async (id: string, userId: string, updated: Partial<
 export const deleteReview = async (id: string, userId: string) => {
   const { error } = await supabase.from('reviews').delete().eq('id', id).eq('user_id', userId);
   if (error) throw error;
+};
+
+export const getReviewerProfile = async (userId: string): Promise<Pick<UserProfile, 'id' | 'name' | 'avatar' | 'title'> | null> => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, name, avatar_url')
+    .eq('id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    name: data.name ?? '',
+    avatar: data.avatar_url ?? '',
+    title: '',
+  };
 };

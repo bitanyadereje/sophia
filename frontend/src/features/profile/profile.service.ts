@@ -1,12 +1,12 @@
 import { supabase } from '../../lib/supabase';
 import { UserProfile } from '../../types';
 
-export const loadProfile = async (userId: string): Promise<Pick<UserProfile, 'name' | 'avatar'>> => {
+export const loadProfile = async (userId: string): Promise<Pick<UserProfile, 'id' | 'name' | 'avatar'>> => {
   const { data, error } = await supabase.from('profiles').select('id, name, username, avatar_url').eq('id', userId).maybeSingle();
   if (error) throw error;
-  if (data) return { name: data.name || data.username || 'Reader', avatar: data.avatar_url || '' };
+  if (data) return { id: data.id, name: data.name || data.username || 'Reader', avatar: data.avatar_url || '' };
   const { data: authData } = await supabase.auth.getUser();
-  return { name: authData.user?.user_metadata?.name || authData.user?.email || 'Reader', avatar: '' };
+  return { id: userId, name: authData.user?.user_metadata?.name || authData.user?.email || 'Reader', avatar: '' };
 };
 
 export const updateProfile = async (userId: string, updated: Partial<UserProfile>) => {

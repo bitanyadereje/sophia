@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Review, UserProfile, Book, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
+import { getReviewerProfile } from '../review.service';
+import { getReviewLikeData, toggleReviewLike } from '../services/reviewInteraction.service';
+import { addReviewComment, loadReviewComments } from '../services/reviewComment.service';
 
 interface ReviewDetailViewProps {
   review: Review;
@@ -9,18 +12,7 @@ interface ReviewDetailViewProps {
   onBack: () => void;
   onNavigate: (screen: ScreenId) => void;
   onSelectBook: (bookId: string) => void;
-  onToggleLike: (reviewId: string) => void;
-  onToggleSave: (reviewId: string) => void;
   onShowToast: (message: string) => void;
-}
-
-interface ReviewCommentItem {
-  id: string;
-  author: string;
-  avatar: string;
-  affiliation: string;
-  timeAgo: string;
-  text: string;
 }
 
 export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
@@ -30,41 +22,110 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
   onBack,
   onNavigate,
   onSelectBook,
-  onToggleLike,
-  onToggleSave,
   onShowToast,
 }) => {
   const { isAmharic } = useLanguage();
   const [commentInput, setCommentInput] = useState('');
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const [comments, setComments] = useState<ReviewCommentItem[]>([]);
+  const [comments, setComments] = useState<any[]>([]);
+  const [isLiked, setIsLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
+  const [authorProfile, setAuthorProfile] = useState<{ name: string; avatar: string } | null>(null);
+
+  useEffect(() => {
+    let isCurrent = true;
+    const loadDetailData = async () => {
+      try {
+        const profile = await getReviewerProfile(review.user_id);
+        if (isCurrent && profile) {
+          setAuthorProfile({ name: profile.name || 'Reader', avatar: profile.avatar || '' });
+        }
+      } catch (error) {
+        console.error(error);
+      }
+
+      try {
+        const dbComments = await loadReviewComments(review.id);
+        if (isCurrent) {
+          setComments(dbComments.map((comment) => ({
+            id: comment.id,
+            author: comment.author?.name || 'Reader',
+            avatar: comment.author?.avatar_url || '',
+            affiliation: 'Sophia Reader',
+            timeAgo: new Date(comment.created_at).toLocaleDateString(),
+            text: comment.content,
+          })));
+        }
+      } catch (error) {
+        console.error(error);
+      }
+
+      try {
+        const likeData = await getReviewLikeData(review.id, currentUser?.id);
+        if (isCurrent) {
+          setLikeCount(likeData.totalLikes);
+          setIsLiked(likeData.isLikedByMe);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    };
+    void loadDetailData();
+    return () => { isCurrent = false; };
+  }, [review.id, review.user_id, currentUser?.id]);
+
+  const handleLike = async () => {
+    if (!currentUser?.id) {
+      onShowToast('Sign in to like reviews.');
+      return;
+    }
+    const prevLiked = isLiked;
+    const prevCount = likeCount;
+    setIsLiked(!prevLiked);
+    setLikeCount(prevLiked ? prevCount - 1 : prevCount + 1);
+    try {
+      await toggleReviewLike(review.id, currentUser.id, prevLiked);
+    } catch (error) {
+      console.error('Failed to toggle review like:', error);
+      setIsLiked(prevLiked);
+      setLikeCount(prevCount);
+      onShowToast(error instanceof Error ? error.message : 'Failed to update like');
+    }
+  };
 
   const reviewDate = new Date(review.created_at).toLocaleDateString(
     isAmharic ? 'am-ET' : 'en',
     { year: 'numeric', month: 'long', day: 'numeric' }
   );
 
-  const handleAddComment = (e: React.FormEvent) => {
+  const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commentInput.trim()) {
-      onShowToast(isAmharic ? 'እባክዎ ከመለጠፍዎ በፊት ማሰላሰያ ይጻፉ' : 'Please write a reflection before posting');
+    if (!commentInput.trim()) return;
+    if (!currentUser?.id) {
+      onShowToast('Sign in to comment on reviews.');
       return;
     }
 
-    const newComment: ReviewCommentItem = {
-      id: `comm-${Date.now()}`,
-      author: currentUser.name,
-      avatar: currentUser.avatar,
-      affiliation: currentUser.title || (isAmharic ? 'የሶፊያ አንባቢ' : 'Sophia Reader'),
-      timeAgo: isAmharic ? 'አሁን' : 'Just now',
-      text: commentInput.trim()
-    };
-
-    setComments(prev => [...prev, newComment]);
+    const text = commentInput.trim();
     setCommentInput('');
-    onShowToast(isAmharic ? 'ማሰላሰያው ወደ ግምገማ ውይይት ተለጥፏል' : 'Reflection posted to review discussion');
-  };
 
+    try {
+      const newDbComment = await addReviewComment(review.id, currentUser.id, text);
+      setComments((prev) => [...prev, {
+        id: newDbComment.id,
+        author: currentUser.name || 'Reader',
+        avatar: currentUser.avatar || '',
+        affiliation: 'Sophia Reader',
+        timeAgo: 'Just now',
+        text,
+      }]);
+      onShowToast('Reflection posted!');
+    } catch (error) {
+      console.error('Failed to post review comment:', error);
+      onShowToast(error instanceof Error ? error.message : 'Failed to post comment');
+      setCommentInput(text);
+    }
+  };
   const handleCopyCitation = () => {
     const textToCopy = `"${review.quote ?? ''}" — ${book?.title ?? 'Review'} (Review by ${currentUser.name})`;
     if (navigator?.clipboard) {
@@ -92,17 +153,17 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => onToggleLike(review.id)}
+              onClick={handleLike}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-theme text-theme-muted hover:text-theme-main hover:bg-theme-subtle text-xs font-sans transition-colors cursor-pointer"
               id="detail-like-btn"
               title={isAmharic ? 'ውደድ' : 'Like review'}
             >
-              <span className="material-symbols-outlined text-[16px]">favorite</span>
-              <span>0</span>
+              <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0" }}>favorite</span>
+              <span>{likeCount}</span>
             </button>
 
             <button
-              onClick={() => onToggleSave(review.id)}
+              onClick={() => {}}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-theme text-theme-muted hover:text-theme-main hover:bg-theme-subtle text-xs font-sans transition-colors cursor-pointer"
               id="detail-save-btn"
               title={isAmharic ? 'አስቀምጥ' : 'Save review'}
@@ -129,11 +190,13 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-theme/60 pb-5">
             <div className="flex items-center gap-3.5">
               <div className="w-13 h-13 rounded-full bg-theme-accent text-white flex items-center justify-center font-serif font-bold text-lg border border-theme shadow-2xs flex-shrink-0">
-                {(currentUser.name || 'R').charAt(0).toUpperCase()}
+                {authorProfile?.avatar ? (
+                  <img src={authorProfile.avatar} alt={authorProfile.name} className="w-full h-full rounded-full object-cover" />
+                ) : (authorProfile?.name || 'Reader').charAt(0).toUpperCase()}
               </div>
               <div>
                 <h2 className="text-base font-serif font-bold text-theme-main leading-snug">
-                  {currentUser.name || 'Reader'}
+                  {authorProfile?.name || 'Reader'}
                 </h2>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-[11px] text-theme-subtle font-sans">

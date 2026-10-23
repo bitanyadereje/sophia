@@ -1,7 +1,10 @@
 
 import React, { useEffect, useState } from 'react';
-import { Book, Review, ScreenId, UserProfile } from '../../../types';
+import { Book, Review, ReviewLike, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
+import { loadReviewerProfilesForReviews } from '../reviewerProfiles';
+import { addReviewComment, loadReviewCommentsForReviews } from '../services/reviewComment.service';
+import { loadReviewLikesForReviews, toggleReviewLike } from '../services/reviewInteraction.service';
 
 interface ReviewerProfile {
   name?: string | null;
@@ -140,14 +143,16 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const [isWriteReviewOpen, setIsWriteReviewOpen] = useState(false);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
 
-  // These are local placeholders, not persistent Supabase data.
   const [savedReviews, setSavedReviews] = useState<Record<string, boolean>>({});
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
-  const [localCommentsList, setLocalCommentsList] = useState<
+  const [commentsByReview, setCommentsByReview] = useState<
     Record<string, LocalComment[]>
   >({});
+  const [reviewLikes, setReviewLikes] = useState<ReviewLike[]>([]);
+  const [loadedReviewerProfiles, setLoadedReviewerProfiles] = useState<Record<string, ReviewerProfile>>({});
+  const profiles = { ...reviewerProfiles, ...loadedReviewerProfiles };
 
   const [newBookId, setNewBookId] = useState('');
   const [bookSearch, setBookSearch] = useState('');
@@ -209,18 +214,79 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     return () => window.clearTimeout(timer);
   }, [targetReviewId]);
 
-  const handleToggleLike = (
-    _id: string,
+  useEffect(() => {
+    let isCurrent = true;
+    const reviewIds = reviews.map((review) => review.id);
+
+    const loadReviewData = async () => {
+      const [profilesResult, likesResult, commentsResult] = await Promise.allSettled([
+        loadReviewerProfilesForReviews(reviews),
+        loadReviewLikesForReviews(reviewIds),
+        loadReviewCommentsForReviews(reviewIds),
+      ]);
+
+      if (!isCurrent) return;
+
+      if (profilesResult.status === 'fulfilled') {
+        setLoadedReviewerProfiles(profilesResult.value);
+      } else {
+        console.error('Failed to load reviewer profiles:', profilesResult.reason);
+      }
+
+      if (likesResult.status === 'fulfilled') {
+        setReviewLikes(likesResult.value);
+      } else {
+        console.error('Failed to load review likes:', likesResult.reason);
+      }
+
+      if (commentsResult.status === 'fulfilled') {
+        setCommentsByReview(commentsResult.value.reduce<Record<string, LocalComment[]>>((result, comment) => {
+          const author = comment.author?.name?.trim() || comment.author?.username?.trim() || 'Reader';
+          result[comment.review_id] = [
+            ...(result[comment.review_id] || []),
+            {
+              id: comment.id,
+              author,
+              text: comment.content,
+              timeAgo: getRelativeDate(comment.created_at, isAmharic),
+            },
+          ];
+          return result;
+        }, {}));
+      } else {
+        console.error('Failed to load review comments:', commentsResult.reason);
+      }
+    };
+
+    void loadReviewData();
+    return () => { isCurrent = false; };
+  }, [reviews, isAmharic]);
+
+  const handleToggleLike = async (
+    id: string,
     e: React.MouseEvent
   ) => {
     e.stopPropagation();
-    onShowToast(
-      isAmharic
-        ? 'የመውደድ ባህሪ ገና አልተገናኘም'
-        : 'Likes are not connected yet.'
-    );
-  };
+    if (!authUserId) {
+      onShowToast(isAmharic ? '\u12cd\u12f0\u12f5 \u1208\u121b\u1235\u1240\u1228\u1265 \u1218\u1218\u122a\u12eb \u12ed\u130d\u1261' : 'Please sign in to like reviews.');
+      return;
+    }
 
+    const wasLiked = reviewLikes.some((like) => like.review_id === id && like.user_id === authUserId);
+    const previousLikes = reviewLikes;
+    setReviewLikes((current) => wasLiked
+      ? current.filter((like) => like.review_id !== id || like.user_id !== authUserId)
+      : [...current, { review_id: id, user_id: authUserId, created_at: new Date().toISOString() }]
+    );
+
+    try {
+      await toggleReviewLike(id, authUserId, wasLiked);
+    } catch (error) {
+      console.error('Failed to toggle review like:', error);
+      setReviewLikes(previousLikes);
+      onShowToast(error instanceof Error ? error.message : 'Could not update like.');
+    }
+  };
   const handleToggleSave = (
     id: string,
     e: React.MouseEvent
@@ -249,7 +315,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     setActiveCommentId((prev) => (prev === id ? null : id));
   };
 
-  const handleAddComment = (
+  const handleAddComment = async (
     reviewId: string,
     e: React.FormEvent
   ) => {
@@ -257,40 +323,33 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     e.stopPropagation();
 
     if (!authUserId) {
-      onShowToast(
-        isAmharic ? 'እባክዎ ይግቡ።' : 'Please sign in to comment.'
-      );
+      onShowToast(isAmharic ? '\u12a5\u1263\u12ad\u12ce \u12ed\u130d\u1261\u1362' : 'Please sign in to comment.');
       return;
     }
 
     const text = commentInputs[reviewId]?.trim();
-
     if (!text) return;
 
-    const comment: LocalComment = {
-      id: `comment-${Date.now()}`,
-      author: currentUser?.name || 'Reader',
-      text,
-      timeAgo: isAmharic ? 'አሁን' : 'Just now',
-    };
+    try {
+      const savedComment = await addReviewComment(reviewId, authUserId, text);
+      const comment: LocalComment = {
+        id: savedComment.id,
+        author: currentUser?.name || 'Reader',
+        text: savedComment.content,
+        timeAgo: getRelativeDate(savedComment.created_at, isAmharic),
+      };
 
-    setLocalCommentsList((prev) => ({
-      ...prev,
-      [reviewId]: [...(prev[reviewId] || []), comment],
-    }));
-
-    setCommentInputs((prev) => ({
-      ...prev,
-      [reviewId]: '',
-    }));
-
-    onShowToast(
-      isAmharic
-        ? 'አስተያየትዎ ታክሏል'
-        : 'Comment added locally. It is not saved to the database.'
-    );
+      setCommentsByReview((prev) => ({
+        ...prev,
+        [reviewId]: [...(prev[reviewId] || []), comment],
+      }));
+      setCommentInputs((prev) => ({ ...prev, [reviewId]: '' }));
+      onShowToast(isAmharic ? '\u12a0\u1235\u1270\u12eb\u12e8\u1275\u12ce \u1270\u122b\u12ad\u12cc\u120d' : 'Comment posted.');
+    } catch (error) {
+      console.error('Failed to add review comment:', error);
+      onShowToast(error instanceof Error ? error.message : 'Could not post comment.');
+    }
   };
-
   const handleCardClick = (review: Review) => {
     if (onSelectReview) {
       onSelectReview(review.id);
@@ -386,7 +445,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     if (!query) return true;
 
     const book = books.find((item) => item.id === review.book_id);
-    const profile = reviewerProfiles[review.user_id];
+    const profile = profiles[review.user_id];
     const reviewerName = getReviewerName(profile);
 
     return [
@@ -586,11 +645,13 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredReviews.map((review) => {
-            const profile = reviewerProfiles[review.user_id];
+            const profile = profiles[review.user_id];
             const reviewerName = getReviewerName(profile);
             const avatarUrl = profile?.avatar_url || profile?.avatar;
             const book = books.find((item) => item.id === review.book_id);
-            const comments = localCommentsList[review.id] || [];
+            const comments = commentsByReview[review.id] || [];
+            const likes = reviewLikes.filter((like) => like.review_id === review.id);
+            const isLiked = likes.some((like) => like.user_id === authUserId);
             const isCommentOpen = activeCommentId === review.id;
             const isSaved = savedReviews[review.id] ?? false;
 
@@ -785,10 +846,10 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                       className="flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle"
                       title={isAmharic ? 'ውደድ' : 'Like review'}
                     >
-                      <span className="material-symbols-outlined text-[16px]">
+                      <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0" }}>
                         favorite
                       </span>
-                      <span>0</span>
+                      <span>{likes.length}</span>
                     </button>
 
                     <button
