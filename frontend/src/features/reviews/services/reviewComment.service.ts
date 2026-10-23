@@ -57,6 +57,34 @@ export const addNestedComment = async (
   return data as ReviewCommentWithAuthor;
 };
 
+export const updateReviewComment = async (
+  commentId: string,
+  userId: string,
+  newContent: string,
+): Promise<void> => {
+  const { data, error } = await supabase
+    .from('review_comments')
+    .update({ content: newContent })
+    .eq('id', commentId)
+    .eq('user_id', userId)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('You do not have permission to edit this comment.');
+};
+
+export const deleteReviewComment = async (commentId: string, userId: string): Promise<void> => {
+  const { data, error } = await supabase
+    .from('review_comments')
+    .delete()
+    .eq('id', commentId)
+    .eq('user_id', userId)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('You do not have permission to delete this comment.');
+};
+
 export const buildCommentTree = (flatComments: ReviewCommentWithAuthor[]): ReviewCommentTree[] => {
   const commentsById = new Map<string, ReviewCommentTree>();
   flatComments.forEach((comment) => {
