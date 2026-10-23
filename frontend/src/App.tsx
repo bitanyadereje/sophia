@@ -40,7 +40,7 @@ export const App: React.FC = () => {
   // --- GLOBAL STATE (Routing, Auth, Theme) ---
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('home');
   const [user, setUser] = useState<UserProfile>(INITIAL_USER);
-  const [theme, setTheme] = useState<ThemeMode>(INITIAL_USER.themePreference || 'light');
+  const [theme, setTheme] = useState<ThemeMode>(INITIAL_USER.themePreference || 'dark');
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   
   // --- GLOBAL UI STATE ---
