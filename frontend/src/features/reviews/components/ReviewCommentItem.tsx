@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { ReviewCommentTree } from '../services/reviewComment.service';
@@ -9,6 +9,8 @@ interface ReviewCommentItemProps {
   currentUser: UserProfile;
   onReply: (commentId: string) => void;
   onLike: (commentId: string) => void;
+  onEdit: (commentId: string, newContent: string) => void;
+  onDelete: (commentId: string) => void;
   commentLikes: Record<string, ReviewLikeData>;
   replyingToCommentId: string | null;
   replyDraft: string;
@@ -21,6 +23,8 @@ export const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
   currentUser,
   onReply,
   onLike,
+  onEdit,
+  onDelete,
   commentLikes,
   replyingToCommentId,
   replyDraft,
@@ -28,6 +32,8 @@ export const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
   onSubmitReply,
 }) => {
   const { isAmharic } = useLanguage();
+  const [isEditing, setIsEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(comment.content);
   const isCurrentUser = comment.user_id === currentUser.id;
   const authorName = comment.author?.name?.trim() || comment.author?.username?.trim() || (isCurrentUser ? currentUser.name : '') || 'Reader';
   const authorAvatar = comment.author?.avatar_url || (isCurrentUser ? currentUser.avatar : '') || '';
@@ -56,9 +62,23 @@ export const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
         </div>
       </div>
 
-      <p className="mt-1.5 pl-9 text-sm text-theme-body leading-relaxed whitespace-pre-line font-serif">
-        {comment.content}
-      </p>
+      {isEditing ? (
+        <form className="mt-2 pl-9 flex flex-col gap-2 max-w-xl" onSubmit={(event) => {
+          event.preventDefault();
+          const content = editDraft.trim();
+          if (!content) return;
+          onEdit(comment.id, content);
+          setIsEditing(false);
+        }}>
+          <textarea rows={3} value={editDraft} onChange={(event) => setEditDraft(event.target.value)} className="w-full text-sm bg-transparent border border-stone-300 dark:border-stone-700 rounded-lg p-2.5 text-theme-main focus:outline-none focus:border-stone-500 font-serif resize-y shadow-2xs" />
+          <div className="flex items-center gap-2">
+            <button type="submit" disabled={!editDraft.trim()} className="px-3 py-1 bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900 rounded-md text-xs font-semibold hover:opacity-90 disabled:opacity-40 cursor-pointer">{isAmharic ? 'Save' : 'Save'}</button>
+            <button type="button" onClick={() => { setEditDraft(comment.content); setIsEditing(false); }} className="px-3 py-1 rounded-md text-xs font-medium text-theme-muted hover:text-theme-main cursor-pointer">{isAmharic ? 'Cancel' : 'Cancel'}</button>
+          </div>
+        </form>
+      ) : (
+        <p className="mt-1.5 pl-9 text-sm text-theme-body leading-relaxed whitespace-pre-line font-serif">{comment.content}</p>
+      )}
 
       <div className="mt-2 pl-9 flex items-center gap-4 text-xs text-theme-muted">
         <button
@@ -84,6 +104,12 @@ export const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
         >
           {isReplying ? (isAmharic ? 'áˆ°áˆ­á‹' : 'Cancel') : (isAmharic ? 'áˆ˜áˆáˆµ áˆµáŒ¥' : 'Reply')}
         </button>
+        {isCurrentUser && (
+          <>
+            <button type="button" onClick={() => { setEditDraft(comment.content); setIsEditing(true); }} className="font-medium hover:text-theme-main hover:underline transition-colors cursor-pointer">{isAmharic ? 'አርትዕ' : 'Edit'}</button>
+            <button type="button" onClick={() => { if (window.confirm(isAmharic ? 'ይህን አስተያየት ከመልሶቹ ጋር ይሰርዙ?' : 'Delete this comment and its replies?')) onDelete(comment.id); }} className="font-medium text-red-600 hover:text-red-700 hover:underline transition-colors cursor-pointer">{isAmharic ? 'ሰርዝ' : 'Delete'}</button>
+          </>
+        )}
       </div>
 
       {isReplying && (
@@ -117,6 +143,8 @@ export const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
               currentUser={currentUser}
               onReply={onReply}
               onLike={onLike}
+              onEdit={onEdit}
+              onDelete={onDelete}
               commentLikes={commentLikes}
               replyingToCommentId={replyingToCommentId}
               replyDraft={replyDraft}
