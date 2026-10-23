@@ -3,7 +3,26 @@ import { Review, UserProfile, Book, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { getReviewerProfile } from '../review.service';
 import { getReviewLikeData, toggleReviewLike } from '../services/reviewInteraction.service';
-import { addReviewComment, loadReviewComments } from '../services/reviewComment.service';
+import {
+  addNestedComment,
+  addReviewComment,
+  buildCommentTree,
+  getCommentLikeData,
+  loadReviewComments,
+  ReviewCommentTree,
+  toggleCommentLike,
+} from '../services/reviewComment.service';
+import { ReviewLikeData } from '../services/reviewInteraction.service';
+import { ReviewCommentItem } from './ReviewCommentItem';
+
+const appendReplyToTree = (
+  comments: ReviewCommentTree[],
+  parentId: string,
+  reply: ReviewCommentTree,
+): ReviewCommentTree[] => comments.map((comment) => {
+  if (comment.id === parentId) return { ...comment, replies: [...comment.replies, reply] };
+  return { ...comment, replies: appendReplyToTree(comment.replies, parentId, reply) };
+});
 
 interface ReviewDetailViewProps {
   review: Review;
@@ -27,7 +46,10 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
   const { isAmharic } = useLanguage();
   const [commentInput, setCommentInput] = useState('');
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const [comments, setComments] = useState<any[]>([]);
+  const [comments, setComments] = useState<ReviewCommentTree[]>([]);
+  const [commentLikes, setCommentLikes] = useState<Record<string, ReviewLikeData>>({});
+  const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
+  const [replyDraft, setReplyDraft] = useState('');
   const [isLiked, setIsLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
   const [authorProfile, setAuthorProfile] = useState<{ name: string; avatar: string } | null>(null);
@@ -47,14 +69,12 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
       try {
         const dbComments = await loadReviewComments(review.id);
         if (isCurrent) {
-          setComments(dbComments.map((comment) => ({
-            id: comment.id,
-            author: comment.author?.name || 'Reader',
-            avatar: comment.author?.avatar_url || '',
-            affiliation: 'Sophia Reader',
-            timeAgo: new Date(comment.created_at).toLocaleDateString(),
-            text: comment.content,
-          })));
+          setComments(buildCommentTree(dbComments));
+          const likeEntries = await Promise.all(dbComments.map(async (comment) => [
+            comment.id,
+            await getCommentLikeData(comment.id, currentUser?.id),
+          ] as const));
+          if (isCurrent) setCommentLikes(Object.fromEntries(likeEntries));
         }
       } catch (error) {
         console.error(error);
@@ -111,19 +131,58 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
 
     try {
       const newDbComment = await addReviewComment(review.id, currentUser.id, text);
-      setComments((prev) => [...prev, {
-        id: newDbComment.id,
-        author: currentUser.name || 'Reader',
-        avatar: currentUser.avatar || '',
-        affiliation: 'Sophia Reader',
-        timeAgo: 'Just now',
-        text,
-      }]);
+      const newComment: ReviewCommentTree = { ...newDbComment, parent_id: null, replies: [] };
+      setComments((prev) => [...prev, newComment]);
+      setCommentLikes((prev) => ({ ...prev, [newComment.id]: { totalLikes: 0, isLikedByMe: false } }));
       onShowToast('Reflection posted!');
     } catch (error) {
       console.error('Failed to post review comment:', error);
       onShowToast(error instanceof Error ? error.message : 'Failed to post comment');
       setCommentInput(text);
+    }
+  };
+
+  const handleAddReply = async (e: React.FormEvent, parentId: string) => {
+    e.preventDefault();
+    const text = replyDraft.trim();
+    if (!text) return;
+    if (!currentUser?.id) {
+      onShowToast(isAmharic ? 'áŠ áˆ›áˆ°áˆ‹áˆ°á‹« áˆˆáˆ›á‹µáˆ¨áŒ áŠ¥á‹á‹« áˆµáˆˆáˆáŒáˆ' : 'Sign in to reply.');
+      return;
+    }
+
+    setReplyDraft('');
+    try {
+      const newDbComment = await addNestedComment(review.id, currentUser.id, text, parentId);
+      const newReply: ReviewCommentTree = { ...newDbComment, parent_id: parentId, replies: [] };
+      setComments((prev) => appendReplyToTree(prev, parentId, newReply));
+      setCommentLikes((prev) => ({ ...prev, [newReply.id]: { totalLikes: 0, isLikedByMe: false } }));
+      setReplyingToCommentId(null);
+      onShowToast(isAmharic ? 'áˆ›áˆ°áˆ‹áˆ°á‹« á‰°áˆáŠ³áˆ' : 'Reply posted!');
+    } catch (error) {
+      console.error('Failed to post review reply:', error);
+      onShowToast(error instanceof Error ? error.message : 'Failed to post reply');
+      setReplyDraft(text);
+    }
+  };
+
+  const handleToggleCommentLike = async (commentId: string) => {
+    if (!currentUser?.id) {
+      onShowToast(isAmharic ? 'áŠ áˆ›áˆ°áˆ‹áˆ°á‹« áˆˆáˆ›á‹µáˆ¨áŒ áŠ¥á‹á‹« áˆµáˆˆáˆáŒáˆ' : 'Sign in to like comments.');
+      return;
+    }
+    const previous = commentLikes[commentId] ?? { totalLikes: 0, isLikedByMe: false };
+    const optimistic = {
+      isLikedByMe: !previous.isLikedByMe,
+      totalLikes: Math.max(0, previous.totalLikes + (previous.isLikedByMe ? -1 : 1)),
+    };
+    setCommentLikes((prev) => ({ ...prev, [commentId]: optimistic }));
+    try {
+      await toggleCommentLike(commentId, currentUser.id, previous.isLikedByMe);
+    } catch (error) {
+      console.error('Failed to toggle comment like:', error);
+      setCommentLikes((prev) => ({ ...prev, [commentId]: previous }));
+      onShowToast(error instanceof Error ? error.message : 'Failed to update comment like');
     }
   };
   const handleCopyCitation = () => {
@@ -318,33 +377,21 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
           ) : (
             <div className="space-y-4 pt-1">
               {comments.map((comment) => (
-                <div
-                  key={comment.id}
-                  className="p-4 rounded-xl border border-theme/70 bg-theme-subtle/30 space-y-2"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <img
-                        src={comment.avatar}
-                        alt={comment.author}
-                        className="w-7 h-7 rounded-full object-cover border border-theme flex-shrink-0"
-                      />
-                      <div>
-                        <span className="text-xs font-serif font-bold text-theme-main block">
-                          {comment.author}
-                        </span>
-                        <span className="text-[10px] text-theme-muted font-sans block">
-                          {comment.affiliation}
-                        </span>
-                      </div>
-                    </div>
-                    <span className="text-[11px] text-theme-subtle font-sans">
-                      {comment.timeAgo}
-                    </span>
-                  </div>
-                  <p className="text-xs sm:text-sm text-theme-body font-sans leading-relaxed pl-9.5">
-                    {comment.text}
-                  </p>
+                <div key={comment.id} className="p-4 rounded-xl border border-theme/70 bg-theme-subtle/30">
+                  <ReviewCommentItem
+                    comment={comment}
+                    currentUser={currentUser}
+                    onReply={(commentId) => {
+                      setReplyingToCommentId((prev) => prev === commentId ? null : commentId);
+                      setReplyDraft('');
+                    }}
+                    onLike={handleToggleCommentLike}
+                    commentLikes={commentLikes}
+                    replyingToCommentId={replyingToCommentId}
+                    replyDraft={replyDraft}
+                    onReplyDraftChange={setReplyDraft}
+                    onSubmitReply={handleAddReply}
+                  />
                 </div>
               ))}
             </div>
