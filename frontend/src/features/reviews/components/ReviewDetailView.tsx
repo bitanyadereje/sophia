@@ -11,6 +11,8 @@ import {
   loadReviewComments,
   ReviewCommentTree,
   toggleCommentLike,
+  updateReviewComment,
+  deleteReviewComment,
 } from '../services/reviewComment.service';
 import { ReviewLikeData } from '../services/reviewInteraction.service';
 import { ReviewCommentItem } from './ReviewCommentItem';
@@ -183,6 +185,46 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
       console.error('Failed to toggle comment like:', error);
       setCommentLikes((prev) => ({ ...prev, [commentId]: previous }));
       onShowToast(error instanceof Error ? error.message : 'Failed to update comment like');
+    }
+  };
+
+  const refreshComments = async () => {
+    const dbComments = await loadReviewComments(review.id);
+    setComments(buildCommentTree(dbComments));
+    const likeEntries = await Promise.all(dbComments.map(async (comment) => [
+      comment.id,
+      await getCommentLikeData(comment.id, currentUser?.id),
+    ] as const));
+    setCommentLikes(Object.fromEntries(likeEntries));
+  };
+
+  const handleEditComment = async (commentId: string, newContent: string) => {
+    if (!currentUser?.id) {
+      onShowToast(isAmharic ? 'áŠ áˆ›áˆ°áˆ‹áˆ°á‹« áˆˆáˆ›áˆµáˆµá‰°áŠ«áŠ­ áˆµáˆˆáˆáŒáˆ' : 'Sign in to edit comments.');
+      return;
+    }
+    try {
+      await updateReviewComment(commentId, currentUser.id, newContent);
+      await refreshComments();
+      onShowToast(isAmharic ? 'áˆ›áˆ°áˆ‹áˆ°á‹« á‰°áˆµáˆµá‰°áŠ«áŠ­á¢' : 'Comment updated.');
+    } catch (error) {
+      console.error('Failed to edit review comment:', error);
+      onShowToast(error instanceof Error ? error.message : 'Unable to edit this comment. Check your permissions.');
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!currentUser?.id) {
+      onShowToast(isAmharic ? 'áŠ áˆ›áˆ°áˆ‹áˆ°á‹« áˆˆáˆ›áˆµáˆµáˆ¨á‹ áˆµáˆˆáˆáŒáˆ' : 'Sign in to delete comments.');
+      return;
+    }
+    try {
+      await deleteReviewComment(commentId, currentUser.id);
+      await refreshComments();
+      onShowToast(isAmharic ? 'áˆ›áˆ°áˆ‹áˆ°á‹« á‰°áˆ°áˆ­á‹Ÿáˆ' : 'Comment deleted.');
+    } catch (error) {
+      console.error('Failed to delete review comment:', error);
+      onShowToast(error instanceof Error ? error.message : 'Unable to delete this comment. Check your permissions.');
     }
   };
   const handleCopyCitation = () => {
@@ -386,6 +428,8 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
                       setReplyDraft('');
                     }}
                     onLike={handleToggleCommentLike}
+                    onEdit={handleEditComment}
+                    onDelete={handleDeleteComment}
                     commentLikes={commentLikes}
                     replyingToCommentId={replyingToCommentId}
                     replyDraft={replyDraft}
