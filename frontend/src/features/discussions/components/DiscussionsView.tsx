@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { createDiscussion, createReply, loadDiscussionsWithAuthors, loadAllRepliesForThread, loadPostLikes, togglePostLike, toggleReplyLike } from '../services/discussion.service';
+import { createDiscussion, createReply, deleteDiscussion, loadDiscussionsWithAuthors, loadAllRepliesForThread, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion } from '../services/discussion.service';
 
 interface DiscussionsViewProps {
   currentUser?: UserProfile;
@@ -477,14 +477,28 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     setIsNewQuestionModalOpen(true);
   };
 
-  const handleDeleteQuestion = (id: string, e: React.MouseEvent) => {
+  const handleDeleteQuestion = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const target = questions.find((item) => item.id === id);
     if (target && !isAuthor(target)) {
       onShowToast('You can only delete questions you authored.');
       return;
     }
-    onShowToast('Discussion deletion is not available yet.');
+    if (!currentUser?.id) {
+      onShowToast('You must be signed in to delete a discussion.');
+      return;
+    }
+    if (!window.confirm('Are you sure you wish to delete this discussion?')) return;
+
+    try {
+      await deleteDiscussion(id, currentUser.id);
+      sessionStorage.removeItem('cached-discussions');
+      await refreshDiscussions();
+      if (activeThreadId === id) handleBackToFeed();
+      onShowToast('Discussion deleted');
+    } catch (error: any) {
+      onShowToast(error?.message || 'Could not delete discussion.');
+    }
   };
 
   const handleSubmitQuestionModal = async (e: React.FormEvent) => {
@@ -492,8 +506,19 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     if (!newTitle.trim()) return;
 
     if (editingQuestion) {
-      onShowToast('Discussion editing is not available yet.');
-      return;
+      if (!currentUser?.id) {
+        onShowToast('You must be signed in to edit a discussion.');
+        return;
+      }
+      try {
+        await updateDiscussion(editingQuestion.id, currentUser.id, newTitle, newBody);
+        sessionStorage.removeItem('cached-discussions');
+        await refreshDiscussions();
+        onShowToast('Discussion updated');
+      } catch (error: any) {
+        onShowToast(error?.message || 'Could not update discussion.');
+        return;
+      }
     } else {
       if (!currentUser?.id) {
         onShowToast('You must be signed in to post a question.');
