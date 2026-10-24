@@ -329,9 +329,9 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     replies,
   }), []);
 
-  const refreshDiscussions = useCallback(async () => {
-    // Only show loading spinner if we have no cached data
-    if (!sessionStorage.getItem('cached-discussions')) setIsLoading(true);
+  const refreshDiscussions = useCallback(async (showLoading = false) => {
+    // Only show the loading state if explicitly requested.
+    if (showLoading) setIsLoading(true);
     
     try {
       const posts = await loadDiscussionsWithAuthors();
@@ -386,7 +386,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
   // Fixed dependency array to prevent infinite loops
   useEffect(() => {
-    void refreshDiscussions();
+    void refreshDiscussions(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
