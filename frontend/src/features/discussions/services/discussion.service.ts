@@ -122,6 +122,35 @@ export const createDiscussion = async (userId: string, title: string, content: s
   return data as DiscussionPost;
 };
 
+export const updateDiscussion = async (
+  postId: string,
+  userId: string,
+  title: string,
+  content: string,
+): Promise<DiscussionPost> => {
+  const { data, error } = await supabase
+    .from('discussion_posts')
+    .update({ title, content, updated_at: new Date().toISOString() })
+    .eq('id', postId)
+    .eq('author_id', userId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as DiscussionPost;
+};
+
+export const deleteDiscussion = async (postId: string, userId: string): Promise<void> => {
+  const { data, error } = await supabase
+    .from('discussion_posts')
+    .delete()
+    .eq('id', postId)
+    .eq('author_id', userId)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('You do not have permission to delete this discussion.');
+};
+
 export const createReply = async (userId: string, parentId: string, content: string): Promise<DiscussionPostWithAuthor> => {
   const { data, error } = await supabase
     .from('discussion_posts')
