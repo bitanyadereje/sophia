@@ -340,7 +340,6 @@ export const App: React.FC = () => {
 
         {currentScreen === 'discussions' && (
           <DiscussionsView
-            questions={questions}
             currentUser={user}
             targetQuestionId={targetQuestionId}
             onClearTargetQuestion={() => setTargetQuestionId(null)}
