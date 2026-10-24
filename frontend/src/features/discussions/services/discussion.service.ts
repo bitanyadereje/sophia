@@ -160,3 +160,27 @@ export const createReply = async (userId: string, parentId: string, content: str
   if (error) throw error;
   return data as DiscussionPostWithAuthor;
 };
+
+export const updateDiscussionReply = async (replyId: string, userId: string, newContent: string): Promise<void> => {
+  const { data, error } = await supabase
+    .from('discussion_posts')
+    .update({ content: newContent, updated_at: new Date().toISOString() })
+    .eq('id', replyId)
+    .eq('author_id', userId)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('You do not have permission to edit this reply.');
+};
+
+export const deleteDiscussionReply = async (replyId: string, userId: string): Promise<void> => {
+  const { data, error } = await supabase
+    .from('discussion_posts')
+    .delete()
+    .eq('id', replyId)
+    .eq('author_id', userId)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('You do not have permission to delete this reply.');
+};
