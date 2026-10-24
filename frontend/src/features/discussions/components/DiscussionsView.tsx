@@ -1,16 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
+import { createDiscussion, createReply, loadDiscussionsWithAuthors, loadAllRepliesForThread, loadPostLikes, togglePostLike, toggleReplyLike } from '../services/discussion.service';
 
 interface DiscussionsViewProps {
-  questions: Question[];
   currentUser?: UserProfile;
   targetQuestionId?: string | null;
   onClearTargetQuestion?: () => void;
-  onAddQuestion: (q: Question) => void;
-  onUpdateQuestion?: (id: string, updated: Partial<Question>) => void;
-  onDeleteQuestion?: (id: string) => void;
-  onAddReply?: (questionId: string, replyText: string, parentReplyId?: string, replyToAuthor?: string) => void;
   onNavigate: (screen: ScreenId) => void;
   onShowToast: (msg: string) => void;
 }
@@ -134,12 +130,12 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
         </div>
       </div>
 
-      {/* Main text body: balanced font size (consistent text-sm across all depths, unboxed) */}
+      {/* Main text body: balanced font size */}
       <div className="mt-1.5 pl-8 sm:pl-9 text-sm text-theme-body leading-relaxed whitespace-pre-line font-serif">
         {comment.text}
       </div>
 
-      {/* Compact, inline action row: small minimalist Like icon with discrete counter & plain text Reply button */}
+      {/* Compact, inline action row */}
       <div className="mt-2 pl-8 sm:pl-9 flex items-center gap-4 text-xs text-theme-muted">
         <button
           type="button"
@@ -230,36 +226,41 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
 };
 
 export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
-  questions,
   currentUser,
   targetQuestionId,
   onClearTargetQuestion,
-  onAddQuestion,
-  onUpdateQuestion,
-  onDeleteQuestion,
-  onAddReply,
   onNavigate,
   onShowToast
 }) => {
   const { t, isAmharic } = useLanguage();
+  
+  // 1. Initialize from sessionStorage to load instantly
+  const [questions, setQuestions] = useState<Question[]>(() => {
+    const cached = sessionStorage.getItem('cached-discussions');
+    return cached ? JSON.parse(cached) : [];
+  });
+  const [postLikes, setPostLikes] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(() => {
+    return !sessionStorage.getItem('cached-discussions');
+  });
 
-  // Navigation & View Mode: if activeThreadId is non-null, display the full Reddit / X thread view
+  // Navigation & View Mode
   const [activeThreadId, setActiveThreadId] = useState<string | null>(targetQuestionId || null);
 
-  // Search & Filter state for the discussions feed
+  // Search & Filter state
   const [selectedTopic, setSelectedTopic] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'discussed'>('recent');
 
-  // Interactive local states for likes, saves, and reply likes
+  // Interactive local states
   const [likedQuestions, setLikedQuestions] = useState<Record<string, boolean>>({});
-  const [savedQuestions, setSavedQuestions] = useState<Record<string, boolean>>({ 'q-conf-1': true });
+  const [savedQuestions, setSavedQuestions] = useState<Record<string, boolean>>({});
   const [likedReplies, setLikedReplies] = useState<Record<string, boolean>>({});
 
-  // Inline replying ID for deep nested replies
+  // Inline replying
   const [inlineReplyingId, setInlineReplyingId] = useState<string | null>(null);
 
-  // Thread Reply dock state (for root reflection or focused reply)
+  // Thread Reply dock state
   const [threadReplyInput, setThreadReplyInput] = useState('');
   const [replyingTo, setReplyingTo] = useState<{ replyId: string; author: string } | null>(null);
   const replyInputRef = useRef<HTMLInputElement>(null);
@@ -273,13 +274,86 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
   const topics = ['All', 'Early Texts', 'Philosophy', 'Reflections', 'History'];
 
-  // When navigated to with a specific targetQuestionId, open that thread immediately
   useEffect(() => {
     if (targetQuestionId) {
       setActiveThreadId(targetQuestionId);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [targetQuestionId]);
+
+  const toQuestion = useCallback((post: any, replies: QuestionReply[] = []): Question => ({
+    id: post.id,
+    author: post.author?.name || 'Reader',
+    authorAvatar: post.author?.avatar_url || '',
+    timeAgo: post.created_at ? new Date(post.created_at).toLocaleDateString() : '',
+    topic: 'Reflections',
+    title: post.title || 'Discussion',
+    body: post.content || '',
+    repliesCount: replies.length,
+    likesCount: Number(post.likesCount ?? 0),
+    replies,
+  }), []);
+
+  const refreshDiscussions = useCallback(async () => {
+    // Only show loading spinner if we have no cached data
+    if (!sessionStorage.getItem('cached-discussions')) setIsLoading(true);
+    
+    try {
+      const posts = await loadDiscussionsWithAuthors();
+      const [likes, postsWithReplies] = await Promise.all([
+        loadPostLikes(posts.map((post) => post.id)),
+        Promise.all(posts.map(async (post) => {
+          const replies = await loadAllRepliesForThread(post.id);
+          return toQuestion(post, replies);
+        })),
+      ]);
+
+      const collectReplyIds = (replies: QuestionReply[] = []): string[] => replies.flatMap((reply) => [
+        reply.id,
+        ...collectReplyIds(reply.replies),
+      ]);
+      const replyLikeRows = await loadPostLikes(collectReplyIds(postsWithReplies.flatMap((question) => question.replies ?? [])));
+
+      const applyReplyLikes = (replies: QuestionReply[] = []): QuestionReply[] => replies.map((reply) => {
+        const replyLikes = replyLikeRows.filter((like) => like.post_id === reply.id);
+        return {
+          ...reply,
+          likesCount: replyLikes.length,
+          userLiked: replyLikes.some((like) => like.user_id === currentUser?.id),
+          replies: applyReplyLikes(reply.replies),
+        };
+      });
+      
+      setPostLikes(likes);
+      const mappedQuestions = postsWithReplies.map((question) => ({
+        ...question,
+        likesCount: likes.filter((like) => like.post_id === question.id).length,
+        replies: applyReplyLikes(question.replies),
+      }));
+      
+      setQuestions(mappedQuestions);
+      // Save to cache for instant loading next time
+      sessionStorage.setItem('cached-discussions', JSON.stringify(mappedQuestions));
+
+      const myLikes: Record<string, boolean> = {};
+      likes.forEach((like) => { if (like.user_id === currentUser?.id) myLikes[like.post_id] = true; });
+      setLikedQuestions(myLikes);
+      const myReplyLikes: Record<string, boolean> = {};
+      replyLikeRows.forEach((like) => { if (like.user_id === currentUser?.id) myReplyLikes[like.post_id] = true; });
+      setLikedReplies(myReplyLikes);
+      
+    } catch (error: any) {
+      onShowToast(error?.message || 'Could not load discussions.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentUser?.id, onShowToast, toQuestion]);
+
+  // Fixed dependency array to prevent infinite loops
+  useEffect(() => {
+    void refreshDiscussions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const activeQuestion = questions.find((q) => q.id === activeThreadId);
 
@@ -307,10 +381,20 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleToggleLike = (id: string) => {
+  const handleToggleLike = async (id: string) => {
+    if (!currentUser?.id) { onShowToast('You must be signed in to like a discussion.'); return; }
     const isLiked = !!likedQuestions[id];
-    setLikedQuestions((prev) => ({ ...prev, [id]: !isLiked }));
-    onShowToast(isLiked ? 'Like removed' : 'Liked discussion');
+    try {
+      await togglePostLike(id, currentUser.id, isLiked);
+      setLikedQuestions((prev) => ({ ...prev, [id]: !isLiked }));
+      setQuestions((prev) => prev.map((question) => question.id === id
+        ? { ...question, likesCount: Math.max(0, question.likesCount + (isLiked ? -1 : 1)) }
+        : question));
+      setPostLikes((prev) => isLiked
+        ? prev.filter((like) => !(like.post_id === id && like.user_id === currentUser.id))
+        : [...prev, { post_id: id, user_id: currentUser.id }]);
+      onShowToast(isLiked ? 'Like removed' : 'Liked discussion');
+    } catch (error: any) { onShowToast(error?.message || 'Could not update like.'); }
   };
 
   const handleToggleSave = (id: string) => {
@@ -319,18 +403,36 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     onShowToast(isSaved ? 'Removed from bookmarks' : 'Bookmarked discussion');
   };
 
-  const handleToggleReplyLike = (replyId: string) => {
+  const updateReplyTree = (replies: QuestionReply[] = [], replyId: string, liked: boolean): QuestionReply[] => replies.map((reply) => {
+    if (reply.id === replyId) {
+      return { ...reply, userLiked: liked, likesCount: Math.max(0, (reply.likesCount ?? 0) + (liked ? 1 : -1)) };
+    }
+    return { ...reply, replies: updateReplyTree(reply.replies, replyId, liked) };
+  });
+
+  const handleToggleReplyLike = async (replyId: string) => {
+    if (!currentUser?.id) { onShowToast('You must be signed in to like a reply.'); return; }
     const isLiked = !!likedReplies[replyId];
-    setLikedReplies((prev) => ({ ...prev, [replyId]: !isLiked }));
-    onShowToast(isLiked ? 'Like removed' : 'Liked reply');
+    try {
+      await toggleReplyLike(replyId, currentUser.id, isLiked);
+      const nextLiked = !isLiked;
+      setLikedReplies((prev) => ({ ...prev, [replyId]: nextLiked }));
+      setQuestions((prev) => prev.map((question) => ({
+        ...question,
+        replies: updateReplyTree(question.replies, replyId, nextLiked),
+      })));
+      onShowToast(isLiked ? 'Like removed' : 'Liked reply');
+    } catch (error: any) { onShowToast(error?.message || 'Could not update reply like.'); }
   };
 
-  const handleDirectNestedReply = (parentId: string, replyToAuthor: string, text: string) => {
-    if (!activeQuestion) return;
-    if (onAddReply) {
-      onAddReply(activeQuestion.id, text, parentId, replyToAuthor);
-    }
-    onShowToast(`Replied to ${replyToAuthor}`);
+  const handleDirectNestedReply = async (parentId: string, replyToAuthor: string, text: string) => {
+    if (!currentUser?.id) { onShowToast('You must be signed in to reply.'); return; }
+    try {
+      await createReply(currentUser.id, parentId, text);
+      sessionStorage.removeItem('cached-discussions'); // Clear cache so fresh replies load
+      await refreshDiscussions();
+      onShowToast(`Replied to ${replyToAuthor}`);
+    } catch (error: any) { onShowToast(error?.message || 'Could not post reply.'); }
   };
 
   const handleCancelReplyingTo = () => {
@@ -338,19 +440,21 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     setThreadReplyInput('');
   };
 
-  const handleSubmitThreadReply = (e: React.FormEvent) => {
+  const handleSubmitThreadReply = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeQuestion) return;
     const text = threadReplyInput.trim();
     if (!text) return;
 
-    if (onAddReply) {
-      onAddReply(activeQuestion.id, text, replyingTo?.replyId, replyingTo?.author);
-    }
-
-    onShowToast(replyingTo ? `Replied to ${replyingTo.author}` : 'Reflection posted to thread');
-    setThreadReplyInput('');
-    setReplyingTo(null);
+    if (!currentUser?.id) { onShowToast('You must be signed in to reply.'); return; }
+    try {
+      await createReply(currentUser.id, replyingTo?.replyId || activeQuestion.id, text);
+      sessionStorage.removeItem('cached-discussions');
+      await refreshDiscussions();
+      onShowToast(replyingTo ? `Replied to ${replyingTo.author}` : 'Reflection posted to thread');
+      setThreadReplyInput('');
+      setReplyingTo(null);
+    } catch (error: any) { onShowToast(error?.message || 'Could not post reply.'); }
   };
 
   const handleOpenNewQuestion = () => {
@@ -380,46 +484,42 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       onShowToast('You can only delete questions you authored.');
       return;
     }
-    if (window.confirm('Are you sure you wish to delete this question?')) {
-      if (onDeleteQuestion) {
-        onDeleteQuestion(id);
-      }
-      if (activeThreadId === id) {
-        handleBackToFeed();
-      }
-      onShowToast('Question deleted');
-    }
+    onShowToast('Discussion deletion is not available yet.');
   };
 
-  const handleSubmitQuestionModal = (e: React.FormEvent) => {
+  const handleSubmitQuestionModal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
 
-    if (editingQuestion && onUpdateQuestion) {
-      onUpdateQuestion(editingQuestion.id, {
-        title: newTitle,
-        body: newBody,
-        topic: newTopic
-      });
-      onShowToast('Question updated');
+    if (editingQuestion) {
+      onShowToast('Discussion editing is not available yet.');
+      return;
     } else {
+      if (!currentUser?.id) {
+        onShowToast('You must be signed in to post a question.');
+        return;
+      }
+
+      let data;
+      try { data = await createDiscussion(currentUser.id, newTitle, newBody); }
+      catch (error: any) { onShowToast(error?.message || 'Could not post question.'); return; }
+
       const created: Question = {
-        id: `q-${Date.now()}`,
-        author: currentUser?.name || 'Beatrice Moreau',
-        authorAvatar:
-          currentUser?.avatar ||
-          'https://lh3.googleusercontent.com/aida-public/AB6AXuC6SXLN7BmYMhMaHuQx6dHdGP7WSd8gbDml9nW92fqjiNQk4_iMslB3RGC5D_6BZzOnYcL2Zh66XVylOLICR1N7YwIqLTCg2F4NCIRD5oyIZLvleFHsSP1hcr3UeQJUDsUROeWS2K0TjEy9M_eQJjQFQqw-ru56VlLRKmCvbCMvrAEumn6YT9dS3OXU3k2CpGD3iDmB8eyULvQTX7yMnP-qk8WtEoickeJeA_ZxOWEd0v-sVX7e5e1xgA',
+        id: data.id,
+        author: currentUser.name || 'Reader',
+        authorAvatar: currentUser.avatar || '',
         timeAgo: 'Just now',
         topic: newTopic,
-        title: newTitle,
-        body: newBody || 'Seeking thoughts and reflections on this passage.',
+        title: data.title || newTitle,
+        body: data.content || newBody,
         repliesCount: 0,
-        likesCount: 1,
+        likesCount: 0,
         saved: false,
         replies: []
       };
 
-      onAddQuestion(created);
+      sessionStorage.removeItem('cached-discussions');
+      await refreshDiscussions();
       onShowToast('New question posted to community');
       setActiveThreadId(created.id);
     }
@@ -451,7 +551,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       return 0;
     });
 
-  // Calculate total replies in thread including all nested levels recursively
   const countAllReplies = (reps?: QuestionReply[]): number => {
     if (!reps) return 0;
     let count = reps.length;
@@ -466,18 +565,16 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
   return (
     <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
       <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6">
-        {/* ============================================================== */}
-        {/* VIEW 1: FULL DISCUSSION THREAD (Deep Nested Reddit/X Architecture) */}
-        {/* ============================================================== */}
-        {activeQuestion ? (
+        
+        {isLoading ? (
+          <div className="py-16 text-center text-theme-muted">Loading discussions…</div>
+        ) : activeQuestion ? (
           <div className="flex flex-col gap-6 animate-in fade-in duration-200">
-            {/* Top Navigation & Breadcrumbs Bar */}
             <div className="flex items-center justify-between pb-2 border-b border-theme/60">
               <button
                 type="button"
                 onClick={handleBackToFeed}
                 className="inline-flex items-center gap-2 text-xs sm:text-sm font-serif font-semibold text-theme-main hover:text-theme-accent transition-colors cursor-pointer group py-1"
-                aria-label={isAmharic ? 'ወደ ሁሉም ውይይቶች ተመለስ' : 'Back to all questions'}
               >
                 <span className="material-symbols-outlined text-[18px] group-hover:-translate-x-0.5 transition-transform">
                   arrow_back
@@ -510,7 +607,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       ? 'text-theme-gold'
                       : 'text-theme-muted hover:text-theme-main hover:bg-theme-subtle'
                   }`}
-                  title={savedQuestions[activeQuestion.id] ? 'Bookmarked' : 'Bookmark thread'}
                 >
                   <span
                     className="material-symbols-outlined text-[19px]"
@@ -526,7 +622,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       type="button"
                       onClick={() => handleOpenEditQuestion(activeQuestion)}
                       className="w-8 h-8 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                      title="Edit question"
                     >
                       <span className="material-symbols-outlined text-[17px]">edit</span>
                     </button>
@@ -534,7 +629,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       type="button"
                       onClick={(e) => handleDeleteQuestion(activeQuestion.id, e)}
                       className="w-8 h-8 rounded-full flex items-center justify-center text-theme-muted hover:text-red-600 hover:bg-red-500/10 transition-colors cursor-pointer"
-                      title="Delete question"
                     >
                       <span className="material-symbols-outlined text-[17px]">delete</span>
                     </button>
@@ -543,9 +637,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
               </div>
             </div>
 
-            {/* Original Post (OP) - Airy, Flat, Elegant Scholarly Card */}
             <article className="bg-theme-surface rounded-xl sm:rounded-2xl p-5 sm:p-7 border border-theme/60 shadow-2xs flex flex-col gap-4">
-              {/* Top row: small circular avatar next to bold username and muted timestamp */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 text-sm">
                   <AvatarWithFallback
@@ -576,25 +668,14 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 )}
               </div>
 
-              {/* Treatise Folio Reference (if present) */}
-              {activeQuestion.bookTitle && activeQuestion.chapter && (
-                <div className="sm:hidden flex items-center gap-1.5 text-xs font-serif text-theme-muted">
-                  <span className="material-symbols-outlined text-[14px] text-theme-accent">menu_book</span>
-                  <span>{activeQuestion.bookTitle} • {activeQuestion.chapter}</span>
-                </div>
-              )}
-
-              {/* Question Title */}
               <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main leading-snug">
                 {activeQuestion.title}
               </h1>
 
-              {/* Question Body: balanced font size */}
               <div className="font-serif text-sm sm:text-base text-theme-body leading-relaxed whitespace-pre-line space-y-3">
                 {activeQuestion.body}
               </div>
 
-              {/* Action row below OP */}
               <div className="pt-3 border-t border-theme/50 flex items-center justify-between text-xs sm:text-sm text-theme-muted">
                 <div className="flex items-center gap-4 sm:gap-6">
                   <button
@@ -613,9 +694,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       thumb_up
                     </span>
                     <span className="tabular-nums">
-                      {likedQuestions[activeQuestion.id]
-                        ? activeQuestion.likesCount + 1
-                        : activeQuestion.likesCount}{' '}
+                      {activeQuestion.likesCount}{' '}
                       {isAmharic ? 'መውደዶች' : 'Likes'}
                     </span>
                   </button>
@@ -640,7 +719,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
               </div>
             </article>
 
-            {/* Flat, Airy Nested Comments Stream */}
             <section className="flex flex-col gap-4 mt-2">
               <div className="flex items-center justify-between px-1 pb-1 border-b border-theme/40">
                 <h2 className="font-serif font-bold text-base sm:text-lg text-theme-main flex items-center gap-2">
@@ -649,12 +727,8 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                     ({countAllReplies(activeQuestion.replies)})
                   </span>
                 </h2>
-                <span className="text-xs text-theme-muted font-sans italic">
-                  {isAmharic ? 'ምሁራዊ ጥያቄዎች እና እይታዎች' : 'Dialectical inquiries & perspectives'}
-                </span>
               </div>
 
-              {/* Nested Comments List - Completely Unenclosed, Airy, Vertical Guide Lines */}
               {activeQuestion.replies && activeQuestion.replies.length > 0 ? (
                 <div className="space-y-6 sm:space-y-7 pt-2">
                   {activeQuestion.replies.map((reply) => (
@@ -687,13 +761,11 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
               )}
             </section>
 
-            {/* Bottom Sticky Reflection Dock for Top-Level or Active Replies */}
             <div className="sticky bottom-16 md:bottom-6 z-20 pt-2">
               <form
                 onSubmit={handleSubmitThreadReply}
                 className="bg-theme-surface/95 backdrop-blur-md border border-stone-300 dark:border-stone-700 rounded-2xl p-2.5 sm:p-3 shadow-xl transition-all"
               >
-                {/* Replying banner if targeted from dock */}
                 {replyingTo && (
                   <div className="flex items-center justify-between pb-2 mb-2 border-b border-theme text-xs font-sans text-theme-accent">
                     <span className="flex items-center gap-1.5 font-medium">
@@ -704,7 +776,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       type="button"
                       onClick={handleCancelReplyingTo}
                       className="text-theme-muted hover:text-theme-main p-0.5 rounded cursor-pointer"
-                      title="Cancel replying to this person"
                     >
                       <span className="material-symbols-outlined text-[16px]">close</span>
                     </button>
@@ -718,7 +789,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                     sizeClass="w-8 h-8"
                   />
 
-                  {/* Input field with integrated minimalistic send icon */}
                   <div className="flex-1 relative flex items-center">
                     <input
                       ref={replyInputRef}
@@ -731,20 +801,16 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                           : 'Contribute a dialectical reflection or answer...'
                       }
                       className="w-full h-10 pl-3.5 pr-10 text-sm rounded-xl border border-stone-300 dark:border-stone-700 bg-transparent text-theme-main placeholder:text-stone-500 dark:placeholder:text-stone-400 focus:outline-none focus:border-stone-500 font-serif"
-                      id="thread-comment-input"
                     />
 
                     <button
                       type="submit"
                       disabled={!threadReplyInput.trim()}
-                      aria-label="Send reflection"
                       className={`absolute right-1 w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
                         threadReplyInput.trim()
                           ? 'bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900 hover:opacity-90 active:scale-95 shadow-2xs'
                           : 'text-stone-400 dark:text-stone-500'
                       }`}
-                      id="submit-thread-comment-btn"
-                      title="Post reflection"
                     >
                       <span className="material-symbols-outlined text-[18px]">send</span>
                     </button>
@@ -754,11 +820,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
             </div>
           </div>
         ) : (
-          /* ============================================================== */
-          /* VIEW 2: ALL DISCUSSIONS FEED & TOPIC FILTER                     */
-          /* ============================================================== */
           <>
-            {/* Top Banner & Title */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-theme pb-4">
               <div>
                 <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main">
@@ -776,7 +838,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                   type="button"
                   onClick={() => onNavigate('colloquium')}
                   className="text-xs font-serif text-theme-muted hover:text-theme-main transition-colors flex items-center gap-1.5 cursor-pointer px-3 py-1.5 rounded-lg hover:bg-theme-subtle group border border-theme"
-                  title="Enter Book Discussion"
                 >
                   <span className="material-symbols-outlined text-[15px] text-theme-accent group-hover:scale-105 transition-transform">
                     forum
@@ -789,7 +850,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
               </div>
             </div>
 
-            {/* Search Bar */}
             <div className="relative">
               <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-theme-subtle text-[18px]">
                 search
@@ -812,7 +872,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
               )}
             </div>
 
-            {/* Topic Filter Chips & Sort */}
             <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-1">
               <div className="flex items-center gap-1.5">
                 {topics.map((topic) => {
@@ -855,23 +914,20 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
               </button>
             </div>
 
-            {/* Question Feed Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredQuestions.map((q) => {
                 const isLiked = !!likedQuestions[q.id];
                 const isSaved = !!savedQuestions[q.id];
-                const likesCount = isLiked ? q.likesCount + 1 : q.likesCount;
+                const likesCount = q.likesCount;
                 const totalReplies = countAllReplies(q.replies);
 
                 return (
                   <article
                     key={q.id}
-                    id={`question-${q.id}`}
                     onClick={() => handleOpenThread(q.id)}
                     className="bg-theme-surface rounded-xl p-4 sm:p-5 border border-theme shadow-xs hover:border-theme-accent/60 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between gap-3 group"
                   >
                     <div className="flex flex-col gap-2.5">
-                      {/* Author row */}
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <AvatarWithFallback
@@ -895,7 +951,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                         </span>
                       </div>
 
-                      {/* Title & Excerpt */}
                       <h3 className="font-serif text-[15px] sm:text-[16px] font-bold text-theme-main leading-snug group-hover:text-theme-accent transition-colors">
                         {q.title}
                       </h3>
@@ -903,7 +958,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                         {q.body}
                       </p>
 
-                      {/* Folio / Book attribution badge if available */}
                       {q.bookTitle && (
                         <div className="flex items-center gap-1 text-[11px] text-theme-accent font-serif pt-0.5">
                           <span className="material-symbols-outlined text-[13px]">menu_book</span>
@@ -912,7 +966,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       )}
                     </div>
 
-                    {/* Footer metrics & Open affordance */}
                     <div
                       className="pt-2.5 border-t border-theme-subtle flex items-center justify-between text-xs text-theme-muted"
                       onClick={(e) => e.stopPropagation()}
@@ -922,7 +975,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                           type="button"
                           onClick={() => handleOpenThread(q.id)}
                           className="flex items-center gap-1 hover:text-theme-accent cursor-pointer font-sans"
-                          title={isAmharic ? 'ሙሉ የውይይት ክር ክፈት' : 'Open full discussion thread'}
                         >
                           <span className="material-symbols-outlined text-[16px]">chat_bubble_outline</span>
                           <span>{totalReplies} {isAmharic ? 'መልሶች' : 'Replies'}</span>
@@ -961,7 +1013,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                           className={`cursor-pointer transition-colors p-1 rounded hover:bg-theme-subtle ${
                             isSaved ? 'text-theme-gold' : 'hover:text-theme-main'
                           }`}
-                          title={isSaved ? (isAmharic ? 'ተቀምጧል' : 'Bookmarked') : (isAmharic ? 'ጥያቄ አስቀምጥ' : 'Save Question')}
                         >
                           <span
                             className="material-symbols-outlined text-[17px]"
@@ -994,21 +1045,17 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
         )}
       </div>
 
-      {/* Floating Action Button for Asking a New Question (Available in list mode) */}
       {!activeThreadId && (
         <button
-          id="discussions-fab-ask-question"
           type="button"
           onClick={handleOpenNewQuestion}
           className="fixed bottom-20 right-5 sm:bottom-8 sm:right-8 lg:bottom-10 lg:right-10 z-30 inline-flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-full bg-theme-main hover:opacity-95 text-white font-serif text-xs sm:text-sm font-semibold tracking-wide shadow-xl active:scale-[0.98] transition-all cursor-pointer"
-          aria-label={isAmharic ? 'ጥያቄ ጠይቅ' : 'Ask a Question'}
         >
           <span className="material-symbols-outlined text-[18px]">add</span>
           <span>{isAmharic ? 'ጥያቄ ጠይቅ' : 'Ask Question'}</span>
         </button>
       )}
 
-      {/* Question Modal (Create & Edit) */}
       {isNewQuestionModalOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
           <form
