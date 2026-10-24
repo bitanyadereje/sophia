@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { createDiscussion, createReply, deleteDiscussion, loadDiscussionsWithAuthors, loadAllRepliesForThread, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion } from '../services/discussion.service';
+import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadDiscussionsWithAuthors, loadAllRepliesForThread, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
 
 interface DiscussionsViewProps {
   currentUser?: UserProfile;
@@ -47,7 +47,10 @@ interface NestedCommentItemProps {
   comment: QuestionReply;
   depth: number;
   likedReplies: Record<string, boolean>;
+  currentUser?: UserProfile;
   onToggleLike: (replyId: string) => void;
+  onEditReply: (replyId: string, content: string) => Promise<void>;
+  onDeleteReply: (replyId: string) => Promise<void>;
   inlineReplyingId: string | null;
   onSetInlineReplyingId: (id: string | null) => void;
   onSubmitReply: (parentId: string, replyToAuthor: string, text: string) => void;
@@ -57,16 +60,22 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
   comment,
   depth,
   likedReplies,
+  currentUser,
   onToggleLike,
+  onEditReply,
+  onDeleteReply,
   inlineReplyingId,
   onSetInlineReplyingId,
   onSubmitReply
 }) => {
   const { isAmharic } = useLanguage();
   const [inlineText, setInlineText] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(comment.text);
   const inlineInputRef = useRef<HTMLTextAreaElement>(null);
 
   const isReplyingHere = inlineReplyingId === comment.id;
+  const isAuthor = !!currentUser?.name && currentUser.name.trim().toLowerCase() === comment.author.trim().toLowerCase();
 
   useEffect(() => {
     if (isReplyingHere) {
@@ -96,6 +105,14 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
     onSubmitReply(comment.id, comment.author, inlineText.trim());
     setInlineText('');
     onSetInlineReplyingId(null);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const content = editDraft.trim();
+    if (!content) return;
+    await onEditReply(comment.id, content);
+    setIsEditing(false);
   };
 
   return (
@@ -131,9 +148,17 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
       </div>
 
       {/* Main text body: balanced font size */}
-      <div className="mt-1.5 pl-8 sm:pl-9 text-sm text-theme-body leading-relaxed whitespace-pre-line font-serif">
-        {comment.text}
-      </div>
+      {isEditing ? (
+        <form onSubmit={handleEditSubmit} className="mt-2 pl-8 sm:pl-9 flex flex-col gap-2 max-w-xl">
+          <textarea rows={3} value={editDraft} onChange={(e) => setEditDraft(e.target.value)} className="w-full text-sm bg-transparent border border-stone-300 dark:border-stone-700 rounded-lg p-2.5 text-theme-main focus:outline-none focus:border-stone-500 font-serif resize-y" />
+          <div className="flex gap-2">
+            <button type="submit" disabled={!editDraft.trim()} className="px-3 py-1 rounded-md text-xs font-semibold bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900 disabled:opacity-40">Save</button>
+            <button type="button" onClick={() => { setEditDraft(comment.text); setIsEditing(false); }} className="px-2.5 py-1 text-xs text-theme-muted">Cancel</button>
+          </div>
+        </form>
+      ) : (
+        <div className="mt-1.5 pl-8 sm:pl-9 text-sm text-theme-body leading-relaxed whitespace-pre-line font-serif">{comment.text}</div>
+      )}
 
       {/* Compact, inline action row */}
       <div className="mt-2 pl-8 sm:pl-9 flex items-center gap-4 text-xs text-theme-muted">
@@ -155,6 +180,13 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
             <span className="tabular-nums text-xs">{displayLikes}</span>
           )}
         </button>
+
+        {isAuthor && !isEditing && (
+          <>
+            <button type="button" onClick={() => { setEditDraft(comment.text); setIsEditing(true); onSetInlineReplyingId(null); }} className="font-medium hover:text-theme-main hover:underline transition-colors cursor-pointer">Edit</button>
+            <button type="button" onClick={() => { if (window.confirm('Delete this reply and its nested replies?')) void onDeleteReply(comment.id); }} className="font-medium text-red-600 hover:underline transition-colors cursor-pointer">Delete</button>
+          </>
+        )}
 
         <button
           type="button"
@@ -213,7 +245,10 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
               comment={child}
               depth={depth + 1}
               likedReplies={likedReplies}
+              currentUser={currentUser}
               onToggleLike={onToggleLike}
+              onEditReply={onEditReply}
+              onDeleteReply={onDeleteReply}
               inlineReplyingId={inlineReplyingId}
               onSetInlineReplyingId={onSetInlineReplyingId}
               onSubmitReply={onSubmitReply}
@@ -433,6 +468,29 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       await refreshDiscussions();
       onShowToast(`Replied to ${replyToAuthor}`);
     } catch (error: any) { onShowToast(error?.message || 'Could not post reply.'); }
+  };
+
+  const handleEditNestedReply = async (replyId: string, content: string) => {
+    if (!currentUser?.id) { onShowToast('You must be signed in to edit a reply.'); throw new Error('Sign in required'); }
+    try {
+      await updateDiscussionReply(replyId, currentUser.id, content);
+      sessionStorage.removeItem('cached-discussions');
+      await refreshDiscussions();
+      onShowToast('Reply updated');
+    } catch (error: any) {
+      onShowToast(error?.message || 'Could not update reply.');
+      throw error;
+    }
+  };
+
+  const handleDeleteNestedReply = async (replyId: string) => {
+    if (!currentUser?.id) { onShowToast('You must be signed in to delete a reply.'); return; }
+    try {
+      await deleteDiscussionReply(replyId, currentUser.id);
+      sessionStorage.removeItem('cached-discussions');
+      await refreshDiscussions();
+      onShowToast('Reply deleted');
+    } catch (error: any) { onShowToast(error?.message || 'Could not delete reply.'); }
   };
 
   const handleCancelReplyingTo = () => {
@@ -762,7 +820,10 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       comment={reply}
                       depth={0}
                       likedReplies={likedReplies}
+                      currentUser={currentUser}
                       onToggleLike={handleToggleReplyLike}
+                      onEditReply={handleEditNestedReply}
+                      onDeleteReply={handleDeleteNestedReply}
                       inlineReplyingId={inlineReplyingId}
                       onSetInlineReplyingId={setInlineReplyingId}
                       onSubmitReply={handleDirectNestedReply}
