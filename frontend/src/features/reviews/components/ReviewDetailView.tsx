@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Review, UserProfile, Book, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { getReviewerProfile } from '../review.service';
@@ -16,15 +17,6 @@ import {
 } from '../services/reviewComment.service';
 import { ReviewLikeData } from '../services/reviewInteraction.service';
 import { ReviewCommentItem } from './ReviewCommentItem';
-
-const appendReplyToTree = (
-  comments: ReviewCommentTree[],
-  parentId: string,
-  reply: ReviewCommentTree,
-): ReviewCommentTree[] => comments.map((comment) => {
-  if (comment.id === parentId) return { ...comment, replies: [...comment.replies, reply] };
-  return { ...comment, replies: appendReplyToTree(comment.replies, parentId, reply) };
-});
 
 interface ReviewDetailViewProps {
   review: Review;
@@ -46,73 +38,78 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
   onShowToast,
 }) => {
   const { isAmharic } = useLanguage();
+  const queryClient = useQueryClient();
+  const detailKey = ['review-detail', review.id] as const;
+  const feedKey = ['reviews-feed'] as const;
   const [commentInput, setCommentInput] = useState('');
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const [comments, setComments] = useState<ReviewCommentTree[]>([]);
-  const [commentLikes, setCommentLikes] = useState<Record<string, ReviewLikeData>>({});
   const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState('');
-  const [isLiked, setIsLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(0);
-  const [authorProfile, setAuthorProfile] = useState<{ name: string; avatar: string } | null>(null);
+  const { data, isPending } = useQuery({
+    queryKey: detailKey,
+    queryFn: async () => {
+      const [likeData, dbComments, profile] = await Promise.all([
+        getReviewLikeData(review.id, currentUser?.id),
+        loadReviewComments(review.id),
+        getReviewerProfile(review.user_id),
+      ]);
+      const likeEntries = await Promise.all(dbComments.map(async (comment) => [
+        comment.id,
+        await getCommentLikeData(comment.id, currentUser?.id),
+      ] as const));
+      return {
+        likeData,
+        comments: buildCommentTree(dbComments),
+        commentLikes: Object.fromEntries(likeEntries) as Record<string, ReviewLikeData>,
+        authorProfile: profile ? { name: profile.name || 'Reader', avatar: profile.avatar || '' } : null,
+      };
+    },
+  });
+  const comments = data?.comments ?? [];
+  const commentLikes = data?.commentLikes ?? {};
+  const isLiked = data?.likeData.isLikedByMe ?? false;
+  const likeCount = data?.likeData.totalLikes ?? 0;
+  const authorProfile = data?.authorProfile ?? null;
 
-  useEffect(() => {
-    let isCurrent = true;
-    const loadDetailData = async () => {
-      try {
-        const profile = await getReviewerProfile(review.user_id);
-        if (isCurrent && profile) {
-          setAuthorProfile({ name: profile.name || 'Reader', avatar: profile.avatar || '' });
-        }
-      } catch (error) {
-        console.error(error);
-      }
-
-      try {
-        const dbComments = await loadReviewComments(review.id);
-        if (isCurrent) {
-          setComments(buildCommentTree(dbComments));
-          const likeEntries = await Promise.all(dbComments.map(async (comment) => [
-            comment.id,
-            await getCommentLikeData(comment.id, currentUser?.id),
-          ] as const));
-          if (isCurrent) setCommentLikes(Object.fromEntries(likeEntries));
-        }
-      } catch (error) {
-        console.error(error);
-      }
-
-      try {
-        const likeData = await getReviewLikeData(review.id, currentUser?.id);
-        if (isCurrent) {
-          setLikeCount(likeData.totalLikes);
-          setIsLiked(likeData.isLikedByMe);
-        }
-      } catch (error) {
-        console.error(error);
-      }
-    };
-    void loadDetailData();
-    return () => { isCurrent = false; };
-  }, [review.id, review.user_id, currentUser?.id]);
+  const likeMutation = useMutation({
+    mutationFn: ({ userId, wasLiked }: { userId: string; wasLiked: boolean }) =>
+      toggleReviewLike(review.id, userId, wasLiked),
+    onMutate: async ({ wasLiked }) => {
+      await queryClient.cancelQueries({ queryKey: detailKey });
+      const previous = queryClient.getQueryData(detailKey);
+      queryClient.setQueryData<any>(detailKey, (old) => old ? {
+        ...old,
+        likeData: {
+          isLikedByMe: !wasLiked,
+          totalLikes: Math.max(0, old.likeData.totalLikes + (wasLiked ? -1 : 1)),
+        },
+      } : old);
+      return { previous };
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(detailKey, context.previous);
+      onShowToast(error instanceof Error ? error.message : 'Failed to update like');
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: detailKey });
+      void queryClient.invalidateQueries({ queryKey: feedKey });
+    },
+  });
+  const addCommentMutation = useMutation({
+    mutationFn: ({ userId, content }: { userId: string; content: string }) =>
+      addReviewComment(review.id, userId, content),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: detailKey });
+      void queryClient.invalidateQueries({ queryKey: feedKey });
+    },
+  });
 
   const handleLike = async () => {
     if (!currentUser?.id) {
       onShowToast('Sign in to like reviews.');
       return;
     }
-    const prevLiked = isLiked;
-    const prevCount = likeCount;
-    setIsLiked(!prevLiked);
-    setLikeCount(prevLiked ? prevCount - 1 : prevCount + 1);
-    try {
-      await toggleReviewLike(review.id, currentUser.id, prevLiked);
-    } catch (error) {
-      console.error('Failed to toggle review like:', error);
-      setIsLiked(prevLiked);
-      setLikeCount(prevCount);
-      onShowToast(error instanceof Error ? error.message : 'Failed to update like');
-    }
+    likeMutation.mutate({ userId: currentUser.id, wasLiked: isLiked });
   };
 
   const reviewDate = new Date(review.created_at).toLocaleDateString(
@@ -132,10 +129,7 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
     setCommentInput('');
 
     try {
-      const newDbComment = await addReviewComment(review.id, currentUser.id, text);
-      const newComment: ReviewCommentTree = { ...newDbComment, parent_id: null, replies: [] };
-      setComments((prev) => [...prev, newComment]);
-      setCommentLikes((prev) => ({ ...prev, [newComment.id]: { totalLikes: 0, isLikedByMe: false } }));
+      await addCommentMutation.mutateAsync({ userId: currentUser.id, content: text });
       onShowToast('Reflection posted!');
     } catch (error) {
       console.error('Failed to post review comment:', error);
@@ -155,10 +149,9 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
 
     setReplyDraft('');
     try {
-      const newDbComment = await addNestedComment(review.id, currentUser.id, text, parentId);
-      const newReply: ReviewCommentTree = { ...newDbComment, parent_id: parentId, replies: [] };
-      setComments((prev) => appendReplyToTree(prev, parentId, newReply));
-      setCommentLikes((prev) => ({ ...prev, [newReply.id]: { totalLikes: 0, isLikedByMe: false } }));
+      await addNestedComment(review.id, currentUser.id, text, parentId);
+      await queryClient.invalidateQueries({ queryKey: detailKey });
+      await queryClient.invalidateQueries({ queryKey: feedKey });
       setReplyingToCommentId(null);
       onShowToast(isAmharic ? 'áˆ›áˆ°áˆ‹áˆ°á‹« á‰°áˆáŠ³áˆ' : 'Reply posted!');
     } catch (error) {
@@ -178,24 +171,25 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
       isLikedByMe: !previous.isLikedByMe,
       totalLikes: Math.max(0, previous.totalLikes + (previous.isLikedByMe ? -1 : 1)),
     };
-    setCommentLikes((prev) => ({ ...prev, [commentId]: optimistic }));
+    queryClient.setQueryData<any>(detailKey, (old) => old ? {
+      ...old,
+      commentLikes: { ...old.commentLikes, [commentId]: optimistic },
+    } : old);
     try {
       await toggleCommentLike(commentId, currentUser.id, previous.isLikedByMe);
     } catch (error) {
       console.error('Failed to toggle comment like:', error);
-      setCommentLikes((prev) => ({ ...prev, [commentId]: previous }));
+      queryClient.setQueryData<any>(detailKey, (old) => old ? {
+        ...old,
+        commentLikes: { ...old.commentLikes, [commentId]: previous },
+      } : old);
       onShowToast(error instanceof Error ? error.message : 'Failed to update comment like');
     }
   };
 
   const refreshComments = async () => {
-    const dbComments = await loadReviewComments(review.id);
-    setComments(buildCommentTree(dbComments));
-    const likeEntries = await Promise.all(dbComments.map(async (comment) => [
-      comment.id,
-      await getCommentLikeData(comment.id, currentUser?.id),
-    ] as const));
-    setCommentLikes(Object.fromEntries(likeEntries));
+    await queryClient.invalidateQueries({ queryKey: detailKey });
+    await queryClient.invalidateQueries({ queryKey: feedKey });
   };
 
   const handleEditComment = async (commentId: string, newContent: string) => {
@@ -238,6 +232,7 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
   return (
     <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
       <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6">
+        {isPending && <div className="py-6 text-center text-theme-muted">Loading review details…</div>}
 
         {/* Top Navigation & Actions */}
         <div className="flex items-center justify-between gap-4 border-b border-theme pb-4">
