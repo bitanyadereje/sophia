@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadDiscussionsWithAuthors, loadDiscussionTopics, loadAllRepliesForThread, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
+import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadDiscussionsWithAuthors, loadDiscussionTopics, loadAllReplies, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
 
 interface DiscussionsViewProps {
   currentUser?: UserProfile;
@@ -268,16 +269,8 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
   onShowToast
 }) => {
   const { t, isAmharic } = useLanguage();
-  
-  // 1. Initialize from sessionStorage to load instantly
-  const [questions, setQuestions] = useState<Question[]>(() => {
-    const cached = sessionStorage.getItem('cached-discussions');
-    return cached ? JSON.parse(cached) : [];
-  });
-  const [postLikes, setPostLikes] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(() => {
-    return !sessionStorage.getItem('cached-discussions');
-  });
+  const queryClient = useQueryClient();
+  const discussionsKey = ['discussions'] as const;
 
   // Navigation & View Mode
   const [activeThreadId, setActiveThreadId] = useState<string | null>(targetQuestionId || null);
@@ -291,6 +284,134 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
   const [likedQuestions, setLikedQuestions] = useState<Record<string, boolean>>({});
   const [savedQuestions, setSavedQuestions] = useState<Record<string, boolean>>({});
   const [likedReplies, setLikedReplies] = useState<Record<string, boolean>>({});
+
+  const { data: questions = [], isPending } = useQuery<Question[]>({
+    queryKey: discussionsKey,
+    queryFn: async () => {
+      const posts = await loadDiscussionsWithAuthors();
+      const [allReplies, likes, topicsByPost] = await Promise.all([
+        loadAllReplies(),
+        loadPostLikes(posts.map((post) => post.id)),
+        loadDiscussionTopics(posts.map((post) => post.id)),
+      ]);
+      const replyIds = allReplies.map((reply) => reply.id);
+      const replyLikeRows = await loadPostLikes(replyIds);
+      const likesByPost = new Map<string, typeof replyLikeRows>();
+      for (const like of replyLikeRows) {
+        const rows = likesByPost.get(like.post_id) ?? [];
+        rows.push(like);
+        likesByPost.set(like.post_id, rows);
+      }
+      const repliesByParent = new Map<string, typeof allReplies>();
+      for (const reply of allReplies) {
+        if (!reply.parent_id) continue;
+        const replies = repliesByParent.get(reply.parent_id) ?? [];
+        replies.push(reply);
+        repliesByParent.set(reply.parent_id, replies);
+      }
+      const buildReplyTree = (parentId: string): QuestionReply[] => (repliesByParent.get(parentId) ?? []).map((reply) => {
+        const replyLikes = likesByPost.get(reply.id) ?? [];
+        return {
+          id: reply.id,
+          author: reply.author?.name || 'Reader',
+          authorAvatar: reply.author?.avatar_url || '',
+          timeAgo: new Date(reply.created_at).toLocaleDateString(),
+          text: reply.content,
+          likesCount: replyLikes.length,
+          userLiked: replyLikes.some((like) => like.user_id === currentUser?.id),
+          replies: buildReplyTree(reply.id),
+        };
+      });
+      return posts.map((post) => ({
+        ...toQuestion(post, buildReplyTree(post.id)),
+        topic: (topicsByPost[post.id] || 'Reflections') as Question['topic'],
+        userLiked: likes.some((like) => like.post_id === post.id && like.user_id === currentUser?.id),
+        likesCount: likes.filter((like) => like.post_id === post.id).length,
+      }));
+    },
+  });
+
+  useEffect(() => {
+    if (!questions.length) return;
+
+    const myLikes: Record<string, boolean> = {};
+    const myReplyLikes: Record<string, boolean> = {};
+
+    const collectReplies = (replies: QuestionReply[] = []) => {
+      replies.forEach((reply) => {
+        if (reply.userLiked) myReplyLikes[reply.id] = true;
+        collectReplies(reply.replies);
+      });
+    };
+
+    questions.forEach((q) => {
+      if ((q as any).userLiked) myLikes[q.id] = true;
+      collectReplies(q.replies);
+    });
+
+    setLikedQuestions(myLikes);
+    setLikedReplies(myReplyLikes);
+  }, [questions]);
+
+  const countRemovedReplies = (replies: QuestionReply[] = [], replyId: string): number => {
+    const countTree = (items: QuestionReply[]): number => items.reduce((total, item) => total + 1 + countTree(item.replies ?? []), 0);
+    for (const reply of replies) {
+      if (reply.id === replyId) return countTree([reply]);
+      const nestedCount = countRemovedReplies(reply.replies ?? [], replyId);
+      if (nestedCount) return nestedCount;
+    }
+    return 0;
+  };
+
+  const deleteDiscussionMutation = useMutation({
+    mutationFn: (id: string) => deleteDiscussion(id, currentUser!.id),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: discussionsKey });
+      const previous = queryClient.getQueryData<Question[]>(discussionsKey);
+      queryClient.setQueryData<Question[]>(discussionsKey, (old = []) => old.filter((q) => q.id !== id));
+      return { previous };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previous) queryClient.setQueryData(discussionsKey, context.previous);
+      onShowToast('Failed to delete. Restored.');
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: discussionsKey }),
+  });
+  const deleteReplyMutation = useMutation({
+    mutationFn: (replyId: string) => deleteDiscussionReply(replyId, currentUser!.id),
+    onMutate: async (replyId) => {
+      await queryClient.cancelQueries({ queryKey: discussionsKey });
+      const previous = queryClient.getQueryData<Question[]>(discussionsKey);
+      const remove = (replies: QuestionReply[] = []): QuestionReply[] => replies
+        .filter((reply) => reply.id !== replyId)
+        .map((reply) => ({ ...reply, replies: remove(reply.replies) }));
+      queryClient.setQueryData<Question[]>(discussionsKey, (old = []) => old.map((question) => ({
+        ...question,
+        replies: remove(question.replies),
+        repliesCount: Math.max(0, question.repliesCount - countRemovedReplies(question.replies, replyId)),
+      })));
+      return { previous };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previous) queryClient.setQueryData(discussionsKey, context.previous);
+      onShowToast('Failed to delete reply. Restored.');
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: discussionsKey }),
+  });
+  const createDiscussionMutation = useMutation({
+    mutationFn: (data: { title: string; body: string; topic: string }) =>
+      createDiscussion(currentUser!.id, data.title, data.body, data.topic),
+    onSuccess: (created) => {
+      void queryClient.invalidateQueries({ queryKey: discussionsKey });
+      onShowToast('Question posted!');
+      setActiveThreadId(created.id);
+      setNewTitle('');
+      setNewBody('');
+      setEditingQuestion(null);
+      setIsNewQuestionModalOpen(false);
+    },
+    onError: (error: any) => onShowToast(error?.message || 'Could not post question.'),
+  });
 
   // Inline replying
   const [inlineReplyingId, setInlineReplyingId] = useState<string | null>(null);
@@ -321,75 +442,13 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     author: post.author?.name || 'Reader',
     authorAvatar: post.author?.avatar_url || '',
     timeAgo: post.created_at ? new Date(post.created_at).toLocaleDateString() : '',
-    topic: 'Reflections',
+    topic: (post.topic || 'Reflections') as Question['topic'],
     title: post.title || 'Discussion',
     body: post.content || '',
     repliesCount: replies.length,
     likesCount: Number(post.likesCount ?? 0),
     replies,
   }), []);
-
-  const refreshDiscussions = useCallback(async (showLoading = false) => {
-    // Only show the loading state if explicitly requested.
-    if (showLoading) setIsLoading(true);
-    
-    try {
-      const posts = await loadDiscussionsWithAuthors();
-      const [likes, topicsByPost] = await Promise.all([
-        loadPostLikes(posts.map((post) => post.id)),
-        loadDiscussionTopics(posts.map((post) => post.id)),
-      ]);
-      const postsWithReplies = await Promise.all(posts.map(async (post) => {
-        const replies = await loadAllRepliesForThread(post.id);
-        return { ...toQuestion(post, replies), topic: topicsByPost[post.id] || 'Reflections' };
-      }));
-
-      const collectReplyIds = (replies: QuestionReply[] = []): string[] => replies.flatMap((reply) => [
-        reply.id,
-        ...collectReplyIds(reply.replies),
-      ]);
-      const replyLikeRows = await loadPostLikes(collectReplyIds(postsWithReplies.flatMap((question) => question.replies ?? [])));
-
-      const applyReplyLikes = (replies: QuestionReply[] = []): QuestionReply[] => replies.map((reply) => {
-        const replyLikes = replyLikeRows.filter((like) => like.post_id === reply.id);
-        return {
-          ...reply,
-          likesCount: replyLikes.length,
-          userLiked: replyLikes.some((like) => like.user_id === currentUser?.id),
-          replies: applyReplyLikes(reply.replies),
-        };
-      });
-      
-      setPostLikes(likes);
-      const mappedQuestions = postsWithReplies.map((question) => ({
-        ...question,
-        likesCount: likes.filter((like) => like.post_id === question.id).length,
-        replies: applyReplyLikes(question.replies),
-      }));
-      
-      setQuestions(mappedQuestions);
-      // Save to cache for instant loading next time
-      sessionStorage.setItem('cached-discussions', JSON.stringify(mappedQuestions));
-
-      const myLikes: Record<string, boolean> = {};
-      likes.forEach((like) => { if (like.user_id === currentUser?.id) myLikes[like.post_id] = true; });
-      setLikedQuestions(myLikes);
-      const myReplyLikes: Record<string, boolean> = {};
-      replyLikeRows.forEach((like) => { if (like.user_id === currentUser?.id) myReplyLikes[like.post_id] = true; });
-      setLikedReplies(myReplyLikes);
-      
-    } catch (error: any) {
-      onShowToast(error?.message || 'Could not load discussions.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentUser?.id, onShowToast, toQuestion]);
-
-  // Fixed dependency array to prevent infinite loops
-  useEffect(() => {
-    void refreshDiscussions(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const activeQuestion = questions.find((q) => q.id === activeThreadId);
 
@@ -423,12 +482,9 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     try {
       await togglePostLike(id, currentUser.id, isLiked);
       setLikedQuestions((prev) => ({ ...prev, [id]: !isLiked }));
-      setQuestions((prev) => prev.map((question) => question.id === id
+      queryClient.setQueryData<Question[]>(discussionsKey, (prev = []) => prev.map((question) => question.id === id
         ? { ...question, likesCount: Math.max(0, question.likesCount + (isLiked ? -1 : 1)) }
         : question));
-      setPostLikes((prev) => isLiked
-        ? prev.filter((like) => !(like.post_id === id && like.user_id === currentUser.id))
-        : [...prev, { post_id: id, user_id: currentUser.id }]);
       onShowToast(isLiked ? 'Like removed' : 'Liked discussion');
     } catch (error: any) { onShowToast(error?.message || 'Could not update like.'); }
   };
@@ -453,7 +509,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       await toggleReplyLike(replyId, currentUser.id, isLiked);
       const nextLiked = !isLiked;
       setLikedReplies((prev) => ({ ...prev, [replyId]: nextLiked }));
-      setQuestions((prev) => prev.map((question) => ({
+      queryClient.setQueryData<Question[]>(discussionsKey, (prev = []) => prev.map((question) => ({
         ...question,
         replies: updateReplyTree(question.replies, replyId, nextLiked),
       })));
@@ -465,8 +521,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     if (!currentUser?.id) { onShowToast('You must be signed in to reply.'); return; }
     try {
       await createReply(currentUser.id, parentId, text);
-      sessionStorage.removeItem('cached-discussions'); // Clear cache so fresh replies load
-      await refreshDiscussions();
+      await queryClient.invalidateQueries({ queryKey: discussionsKey });
       onShowToast(`Replied to ${replyToAuthor}`);
     } catch (error: any) { onShowToast(error?.message || 'Could not post reply.'); }
   };
@@ -475,8 +530,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     if (!currentUser?.id) { onShowToast('You must be signed in to edit a reply.'); throw new Error('Sign in required'); }
     try {
       await updateDiscussionReply(replyId, currentUser.id, content);
-      sessionStorage.removeItem('cached-discussions');
-      await refreshDiscussions();
+      await queryClient.invalidateQueries({ queryKey: discussionsKey });
       onShowToast('Reply updated');
     } catch (error: any) {
       onShowToast(error?.message || 'Could not update reply.');
@@ -486,33 +540,11 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
   const handleDeleteNestedReply = async (replyId: string) => {
     if (!currentUser?.id) { onShowToast('You must be signed in to delete a reply.'); return; }
-    const countReplies = (replies: QuestionReply[] = []): number => replies.reduce(
-      (count, reply) => count + 1 + countReplies(reply.replies), 0,
-    );
-    const countRemovedReplies = (replies: QuestionReply[] = []): number => {
-      for (const reply of replies) {
-        if (reply.id === replyId) return countReplies([reply]);
-        const nestedCount = countRemovedReplies(reply.replies);
-        if (nestedCount) return nestedCount;
-      }
-      return 0;
-    };
-    const removedCount = questions.reduce((count, question) => count + countRemovedReplies(question.replies), 0);
-    const removeReply = (replies: QuestionReply[] = []): QuestionReply[] => replies
-      .filter((reply) => reply.id !== replyId)
-      .map((reply) => ({ ...reply, replies: removeReply(reply.replies) }));
-    setQuestions((prev) => prev.map((question) => ({
-      ...question,
-      replies: removeReply(question.replies),
-      repliesCount: Math.max(0, question.repliesCount - removedCount),
-    })));
     onShowToast('Reply deleted');
     try {
-      await deleteDiscussionReply(replyId, currentUser.id);
-      sessionStorage.removeItem('cached-discussions');
+      await deleteReplyMutation.mutateAsync(replyId);
     } catch (error: any) {
-      onShowToast(error?.message || 'Failed to delete reply. Restoring...');
-      await refreshDiscussions();
+      // Error toast and cache rollback are handled by the mutation.
     }
   };
 
@@ -530,8 +562,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     if (!currentUser?.id) { onShowToast('You must be signed in to reply.'); return; }
     try {
       await createReply(currentUser.id, replyingTo?.replyId || activeQuestion.id, text);
-      sessionStorage.removeItem('cached-discussions');
-      await refreshDiscussions();
+      await queryClient.invalidateQueries({ queryKey: discussionsKey });
       onShowToast(replyingTo ? `Replied to ${replyingTo.author}` : 'Reflection posted to thread');
       setThreadReplyInput('');
       setReplyingTo(null);
@@ -571,15 +602,12 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     }
     if (!window.confirm('Are you sure you want to delete this?')) return;
 
-    setQuestions((prev) => prev.filter((q) => q.id !== id));
     if (activeThreadId === id) handleBackToFeed();
-    onShowToast('Discussion deleted');
     try {
-      await deleteDiscussion(id, currentUser.id);
-      sessionStorage.removeItem('cached-discussions');
+      await deleteDiscussionMutation.mutateAsync(id);
+      onShowToast('Discussion deleted');
     } catch (error) {
-      onShowToast('Failed to delete. Restoring...');
-      await refreshDiscussions();
+      // Error toast and cache rollback are handled by the mutation.
     }
   };
 
@@ -594,8 +622,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       }
       try {
         await updateDiscussion(editingQuestion.id, currentUser.id, newTitle, newBody, newTopic);
-        sessionStorage.removeItem('cached-discussions');
-        await refreshDiscussions();
+        await queryClient.invalidateQueries({ queryKey: discussionsKey });
         onShowToast('Discussion updated');
       } catch (error: any) {
         onShowToast(error?.message || 'Could not update discussion.');
@@ -607,28 +634,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
         return;
       }
 
-      let data;
-      try { data = await createDiscussion(currentUser.id, newTitle, newBody, newTopic); }
-      catch (error: any) { onShowToast(error?.message || 'Could not post question.'); return; }
-
-      const created: Question = {
-        id: data.id,
-        author: currentUser.name || 'Reader',
-        authorAvatar: currentUser.avatar || '',
-        timeAgo: 'Just now',
-        topic: newTopic,
-        title: data.title || newTitle,
-        body: data.content || newBody,
-        repliesCount: 0,
-        likesCount: 0,
-        saved: false,
-        replies: []
-      };
-
-      sessionStorage.removeItem('cached-discussions');
-      await refreshDiscussions();
-      onShowToast('New question posted to community');
-      setActiveThreadId(created.id);
+      await createDiscussionMutation.mutateAsync({ title: newTitle, body: newBody, topic: newTopic });
     }
 
     setNewTitle('');
@@ -673,9 +679,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
       <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6">
         
-        {isLoading ? (
-          <div className="py-16 text-center text-theme-muted">Loading discussions…</div>
-        ) : activeQuestion ? (
+       {activeQuestion ? (
           <div className="flex flex-col gap-6 animate-in fade-in duration-200">
             <div className="flex items-center justify-between pb-2 border-b border-theme/60">
               <button
