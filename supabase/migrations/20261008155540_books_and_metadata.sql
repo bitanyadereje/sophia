@@ -56,6 +56,13 @@ CREATE TABLE public.tags (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+INSERT INTO public.tags (slug, name, category) VALUES
+    ('early-texts', 'Early Texts', 'discussion_topic'),
+    ('philosophy', 'Philosophy', 'discussion_topic'),
+    ('reflections', 'Reflections', 'discussion_topic'),
+    ('history', 'History', 'discussion_topic')
+ON CONFLICT (slug) DO NOTHING;
+
 
 -- BOOK ↔ TAG
 
