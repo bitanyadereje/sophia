@@ -33,6 +33,16 @@ export const loadAllRepliesForThread = async (threadId: string): Promise<Questio
   return buildTree(threadId);
 };
 
+export const loadAllReplies = async (): Promise<DiscussionPostWithAuthor[]> => {
+  const { data, error } = await supabase
+    .from('discussion_posts')
+    .select('*, author:profiles!discussion_posts_author_id_fkey(name, username, avatar_url)')
+    .not('parent_id', 'is', null)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as DiscussionPostWithAuthor[];
+};
+
 export const getReplyLikeData = async (replyId: string, userId?: string): Promise<PostLikeData> => {
   const { count, error: countError } = await supabase
     .from('post_likes')
