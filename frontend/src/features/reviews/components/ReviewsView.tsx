@@ -1,10 +1,12 @@
 
 import React, { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Book, Review, ReviewLike, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { loadReviewerProfilesForReviews } from '../reviewerProfiles';
 import { addReviewComment, loadReviewCommentsForReviews } from '../services/reviewComment.service';
 import { loadReviewLikesForReviews, toggleReviewLike } from '../services/reviewInteraction.service';
+import { loadReviews } from '../review.service';
 
 interface ReviewerProfile {
   name?: string | null;
@@ -137,6 +139,8 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   onShowToast,
 }) => {
   const { isAmharic } = useLanguage();
+  const queryClient = useQueryClient();
+  const feedKey = ['reviews-feed'] as const;
 
   const [selectedTradition, setSelectedTradition] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -147,12 +151,58 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
-  const [commentsByReview, setCommentsByReview] = useState<
-    Record<string, LocalComment[]>
-  >({});
-  const [reviewLikes, setReviewLikes] = useState<ReviewLike[]>([]);
-  const [loadedReviewerProfiles, setLoadedReviewerProfiles] = useState<Record<string, ReviewerProfile>>({});
-  const profiles = { ...reviewerProfiles, ...loadedReviewerProfiles };
+  const profiles = reviewerProfiles;
+
+  const { data: feedData, isPending } = useQuery({
+    queryKey: feedKey,
+    queryFn: async () => {
+      const loadedReviews = await loadReviews();
+      const reviewIds = loadedReviews.map((review) => review.id);
+      const [likes, comments, loadedProfiles] = await Promise.all([
+        loadReviewLikesForReviews(reviewIds),
+        loadReviewCommentsForReviews(reviewIds),
+        loadReviewerProfilesForReviews(loadedReviews),
+      ]);
+      return { reviews: loadedReviews, likes, comments, profiles: loadedProfiles };
+    },
+  });
+  const feedReviews = feedData?.reviews ?? reviews;
+  const reviewLikes = feedData?.likes ?? [];
+  const commentsByReview = (feedData?.comments ?? []).reduce<Record<string, LocalComment[]>>((result, comment) => {
+    const author = comment.author?.name?.trim() || comment.author?.username?.trim() || 'Reader';
+    result[comment.review_id] = [
+      ...(result[comment.review_id] || []),
+      { id: comment.id, author, text: comment.content, timeAgo: getRelativeDate(comment.created_at, isAmharic) },
+    ];
+    return result;
+  }, {});
+  const loadedProfiles = feedData?.profiles as Record<string, ReviewerProfile> | undefined;
+  const feedProfiles = { ...profiles, ...loadedProfiles };
+
+  const toggleLikeMutation = useMutation({
+    mutationFn: ({ reviewId, userId, wasLiked }: { reviewId: string; userId: string; wasLiked: boolean }) =>
+      toggleReviewLike(reviewId, userId, wasLiked),
+    onMutate: async ({ reviewId, userId, wasLiked }) => {
+      await queryClient.cancelQueries({ queryKey: feedKey });
+      const previous = queryClient.getQueryData(feedKey);
+      queryClient.setQueryData<any>(feedKey, (old) => old ? {
+        ...old,
+        likes: wasLiked
+          ? old.likes.filter((like: ReviewLike) => like.review_id !== reviewId || like.user_id !== userId)
+          : [...old.likes, { review_id: reviewId, user_id: userId, created_at: new Date().toISOString() }],
+      } : old);
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(feedKey, context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: feedKey }),
+  });
+  const addCommentMutation = useMutation({
+    mutationFn: ({ reviewId, userId, content }: { reviewId: string; userId: string; content: string }) =>
+      addReviewComment(reviewId, userId, content),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: feedKey }),
+  });
 
   const [newBookId, setNewBookId] = useState('');
   const [bookSearch, setBookSearch] = useState('');
@@ -214,54 +264,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     return () => window.clearTimeout(timer);
   }, [targetReviewId]);
 
-  useEffect(() => {
-    let isCurrent = true;
-    const reviewIds = reviews.map((review) => review.id);
-
-    const loadReviewData = async () => {
-      const [profilesResult, likesResult, commentsResult] = await Promise.allSettled([
-        loadReviewerProfilesForReviews(reviews),
-        loadReviewLikesForReviews(reviewIds),
-        loadReviewCommentsForReviews(reviewIds),
-      ]);
-
-      if (!isCurrent) return;
-
-      if (profilesResult.status === 'fulfilled') {
-        setLoadedReviewerProfiles(profilesResult.value);
-      } else {
-        console.error('Failed to load reviewer profiles:', profilesResult.reason);
-      }
-
-      if (likesResult.status === 'fulfilled') {
-        setReviewLikes(likesResult.value);
-      } else {
-        console.error('Failed to load review likes:', likesResult.reason);
-      }
-
-      if (commentsResult.status === 'fulfilled') {
-        setCommentsByReview(commentsResult.value.reduce<Record<string, LocalComment[]>>((result, comment) => {
-          const author = comment.author?.name?.trim() || comment.author?.username?.trim() || 'Reader';
-          result[comment.review_id] = [
-            ...(result[comment.review_id] || []),
-            {
-              id: comment.id,
-              author,
-              text: comment.content,
-              timeAgo: getRelativeDate(comment.created_at, isAmharic),
-            },
-          ];
-          return result;
-        }, {}));
-      } else {
-        console.error('Failed to load review comments:', commentsResult.reason);
-      }
-    };
-
-    void loadReviewData();
-    return () => { isCurrent = false; };
-  }, [reviews, isAmharic]);
-
   const handleToggleLike = async (
     id: string,
     e: React.MouseEvent
@@ -273,19 +275,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     }
 
     const wasLiked = reviewLikes.some((like) => like.review_id === id && like.user_id === authUserId);
-    const previousLikes = reviewLikes;
-    setReviewLikes((current) => wasLiked
-      ? current.filter((like) => like.review_id !== id || like.user_id !== authUserId)
-      : [...current, { review_id: id, user_id: authUserId, created_at: new Date().toISOString() }]
-    );
-
-    try {
-      await toggleReviewLike(id, authUserId, wasLiked);
-    } catch (error) {
-      console.error('Failed to toggle review like:', error);
-      setReviewLikes(previousLikes);
-      onShowToast(error instanceof Error ? error.message : 'Could not update like.');
-    }
+    toggleLikeMutation.mutate({ reviewId: id, userId: authUserId, wasLiked });
   };
   const handleToggleSave = (
     id: string,
@@ -331,18 +321,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     if (!text) return;
 
     try {
-      const savedComment = await addReviewComment(reviewId, authUserId, text);
-      const comment: LocalComment = {
-        id: savedComment.id,
-        author: currentUser?.name || 'Reader',
-        text: savedComment.content,
-        timeAgo: getRelativeDate(savedComment.created_at, isAmharic),
-      };
-
-      setCommentsByReview((prev) => ({
-        ...prev,
-        [reviewId]: [...(prev[reviewId] || []), comment],
-      }));
+      await addCommentMutation.mutateAsync({ reviewId, userId: authUserId, content: text });
       setCommentInputs((prev) => ({ ...prev, [reviewId]: '' }));
       onShowToast(isAmharic ? '\u12a0\u1235\u1270\u12eb\u12e8\u1275\u12ce \u1270\u122b\u12ad\u12cc\u120d' : 'Comment posted.');
     } catch (error) {
@@ -414,7 +393,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   ) => {
     e.stopPropagation();
 
-    const review = reviews.find((item) => item.id === id);
+    const review = feedReviews.find((item) => item.id === id);
 
     if (review && !isAuthor(review)) {
       onShowToast('You can only delete your own reviews.');
@@ -433,10 +412,11 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       return;
     }
 
+    await queryClient.invalidateQueries({ queryKey: feedKey });
     onShowToast(isAmharic ? 'ዳሰሳው ተሰርዟል' : 'Review deleted.');
   };
 
-  const filteredReviews = reviews.filter((review) => {
+  const filteredReviews = feedReviews.filter((review) => {
     // Tradition filtering is disabled until reviews have tradition metadata.
     if (selectedTradition !== 'All') return false;
 
@@ -445,7 +425,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     if (!query) return true;
 
     const book = books.find((item) => item.id === review.book_id);
-    const profile = profiles[review.user_id];
+    const profile = feedProfiles[review.user_id];
     const reviewerName = getReviewerName(profile);
 
     return [
@@ -550,6 +530,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
 
     resetForm();
     setIsWriteReviewOpen(false);
+    await queryClient.invalidateQueries({ queryKey: feedKey });
   };
 
   const closeForm = () => {
@@ -643,9 +624,12 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
           ))}
         </div>
 
+        {isPending ? (
+          <div className="py-16 text-center text-theme-muted">Loading reviews…</div>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredReviews.map((review) => {
-            const profile = profiles[review.user_id];
+            const profile = feedProfiles[review.user_id];
             const reviewerName = getReviewerName(profile);
             const avatarUrl = profile?.avatar_url || profile?.avatar;
             const book = books.find((item) => item.id === review.book_id);
@@ -960,6 +944,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
             </div>
           )}
         </div>
+        )}
       </div>
 
       {isWriteReviewOpen && (
