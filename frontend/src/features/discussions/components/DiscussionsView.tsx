@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadDiscussionsWithAuthors, loadAllRepliesForThread, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
+import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadDiscussionsWithAuthors, loadDiscussionTopics, loadAllRepliesForThread, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
 
 interface DiscussionsViewProps {
   currentUser?: UserProfile;
@@ -335,13 +335,14 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     
     try {
       const posts = await loadDiscussionsWithAuthors();
-      const [likes, postsWithReplies] = await Promise.all([
+      const [likes, topicsByPost] = await Promise.all([
         loadPostLikes(posts.map((post) => post.id)),
-        Promise.all(posts.map(async (post) => {
-          const replies = await loadAllRepliesForThread(post.id);
-          return toQuestion(post, replies);
-        })),
+        loadDiscussionTopics(posts.map((post) => post.id)),
       ]);
+      const postsWithReplies = await Promise.all(posts.map(async (post) => {
+        const replies = await loadAllRepliesForThread(post.id);
+        return { ...toQuestion(post, replies), topic: topicsByPost[post.id] || 'Reflections' };
+      }));
 
       const collectReplyIds = (replies: QuestionReply[] = []): string[] => replies.flatMap((reply) => [
         reply.id,
@@ -485,12 +486,34 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
   const handleDeleteNestedReply = async (replyId: string) => {
     if (!currentUser?.id) { onShowToast('You must be signed in to delete a reply.'); return; }
+    const countReplies = (replies: QuestionReply[] = []): number => replies.reduce(
+      (count, reply) => count + 1 + countReplies(reply.replies), 0,
+    );
+    const countRemovedReplies = (replies: QuestionReply[] = []): number => {
+      for (const reply of replies) {
+        if (reply.id === replyId) return countReplies([reply]);
+        const nestedCount = countRemovedReplies(reply.replies);
+        if (nestedCount) return nestedCount;
+      }
+      return 0;
+    };
+    const removedCount = questions.reduce((count, question) => count + countRemovedReplies(question.replies), 0);
+    const removeReply = (replies: QuestionReply[] = []): QuestionReply[] => replies
+      .filter((reply) => reply.id !== replyId)
+      .map((reply) => ({ ...reply, replies: removeReply(reply.replies) }));
+    setQuestions((prev) => prev.map((question) => ({
+      ...question,
+      replies: removeReply(question.replies),
+      repliesCount: Math.max(0, question.repliesCount - removedCount),
+    })));
+    onShowToast('Reply deleted');
     try {
       await deleteDiscussionReply(replyId, currentUser.id);
       sessionStorage.removeItem('cached-discussions');
+    } catch (error: any) {
+      onShowToast(error?.message || 'Failed to delete reply. Restoring...');
       await refreshDiscussions();
-      onShowToast('Reply deleted');
-    } catch (error: any) { onShowToast(error?.message || 'Could not delete reply.'); }
+    }
   };
 
   const handleCancelReplyingTo = () => {
@@ -546,16 +569,17 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       onShowToast('You must be signed in to delete a discussion.');
       return;
     }
-    if (!window.confirm('Are you sure you wish to delete this discussion?')) return;
+    if (!window.confirm('Are you sure you want to delete this?')) return;
 
+    setQuestions((prev) => prev.filter((q) => q.id !== id));
+    if (activeThreadId === id) handleBackToFeed();
+    onShowToast('Discussion deleted');
     try {
       await deleteDiscussion(id, currentUser.id);
       sessionStorage.removeItem('cached-discussions');
+    } catch (error) {
+      onShowToast('Failed to delete. Restoring...');
       await refreshDiscussions();
-      if (activeThreadId === id) handleBackToFeed();
-      onShowToast('Discussion deleted');
-    } catch (error: any) {
-      onShowToast(error?.message || 'Could not delete discussion.');
     }
   };
 
@@ -569,7 +593,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
         return;
       }
       try {
-        await updateDiscussion(editingQuestion.id, currentUser.id, newTitle, newBody);
+        await updateDiscussion(editingQuestion.id, currentUser.id, newTitle, newBody, newTopic);
         sessionStorage.removeItem('cached-discussions');
         await refreshDiscussions();
         onShowToast('Discussion updated');
@@ -584,7 +608,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       }
 
       let data;
-      try { data = await createDiscussion(currentUser.id, newTitle, newBody); }
+      try { data = await createDiscussion(currentUser.id, newTitle, newBody, newTopic); }
       catch (error: any) { onShowToast(error?.message || 'Could not post question.'); return; }
 
       const created: Question = {
