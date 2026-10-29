@@ -304,6 +304,7 @@ export const App: React.FC = () => {
         {currentScreen === 'home' && (
           <HomeFeedView
             user={user}
+            userId={authUserId}
             books={books}
             onUpdateUser={handleUpdateUser}
             onNavigate={(s) => {
