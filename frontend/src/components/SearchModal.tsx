@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Book, Question, ReadingPath, Note, ScreenId } from '../types';
+import { Book, Question, ReadingPath, ScreenId } from '../types';
 import { useLanguage } from '../context/LanguageContext';
+import { useQuery } from '@tanstack/react-query';
+import { loadNotes } from '../features/notes/notes.service';
 
 interface SearchModalProps {
   isOpen: boolean;
@@ -8,7 +10,7 @@ interface SearchModalProps {
   books?: Book[];
   questions: Question[];
   paths: ReadingPath[];
-  notes: Note[];
+  authUserId: string | null;
   onNavigate: (screen: ScreenId) => void;
 }
 
@@ -18,11 +20,16 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   books: _books = [],
   questions,
   paths,
-  notes,
+  authUserId,
   onNavigate
 }) => {
   const { isAmharic } = useLanguage();
   const [term, setTerm] = useState('');
+  const { data: notes = [] } = useQuery({
+    queryKey: ['notes', authUserId],
+    queryFn: () => loadNotes(authUserId!),
+    enabled: isOpen && Boolean(authUserId),
+  });
 
   if (!isOpen) return null;
 
