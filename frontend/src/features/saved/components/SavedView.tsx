@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Book, Bookmark, Note, ReadingStatus, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { NotesView } from '../../notes/components/NotesView';
 import { loadNotes } from '../../notes/notes.service';
+import { loadUserLibrary, removeBookFromLibrary, updateBookStatus } from '../../library/library.service';
 
 interface SavedViewProps {
   bookmarks: Bookmark[];
@@ -13,7 +14,6 @@ interface SavedViewProps {
   onAddBookmark?: (bm: Bookmark) => void;
   onUpdateBookmark?: (id: string, updated: Partial<Bookmark>) => void;
   onDeleteBookmark?: (id: string) => void;
-  onUpdateBookStatus?: (bookId: string, status: ReadingStatus) => void;
   onSelectBook?: (bookId: string) => void;
   onNavigate: (screen: ScreenId) => void;
   onShowToast: (msg: string) => void;
@@ -27,12 +27,12 @@ export const SavedView: React.FC<SavedViewProps> = ({
   onAddBookmark,
   onUpdateBookmark,
   onDeleteBookmark,
-  onUpdateBookStatus,
   onSelectBook,
   onNavigate,
   onShowToast
 }) => {
   const { t, isAmharic } = useLanguage();
+  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<'bookmarks' | 'notes' | 'library'>(initialTab);
   const [libraryFilter, setLibraryFilter] = useState<'all' | 'reading' | 'want' | 'read'>('all');
@@ -40,9 +40,25 @@ export const SavedView: React.FC<SavedViewProps> = ({
   const [localBookmarks, setLocalBookmarks] = useState<Bookmark[]>(initialBookmarks);
   const bookmarks = initialBookmarks.length > 0 ? initialBookmarks : localBookmarks;
   const { data: notes = [] } = useQuery({
-    queryKey: ['notes', userId],
+    queryKey: ['notes', 'all', userId],
     queryFn: () => loadNotes(userId!),
     enabled: Boolean(userId),
+  });
+  const { data: userLibrary = [], isPending: isLibraryPending } = useQuery({
+    queryKey: ['library', userId],
+    queryFn: () => loadUserLibrary(userId!),
+    enabled: Boolean(userId),
+  });
+  const setBookStatusMutation = useMutation({
+    mutationFn: ({ bookId, status }: { bookId: string; status: ReadingStatus }) =>
+      updateBookStatus(userId!, bookId, status),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['library', userId] }),
+    onError: () => onShowToast('Could not update your library'),
+  });
+  const removeBookMutation = useMutation({
+    mutationFn: (bookId: string) => removeBookFromLibrary(userId!, bookId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['library', userId] }),
+    onError: () => onShowToast('Could not remove book from your library'),
   });
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -134,7 +150,16 @@ export const SavedView: React.FC<SavedViewProps> = ({
 
 
 
-  const filteredBooks = books.filter((b) => {
+  const libraryStatuses = new Map(userLibrary.map((entry) => [entry.book_id, entry.status]));
+  const shelfBooks = books.filter((book) => {
+    const status = libraryStatuses.get(book.id);
+    if (!status) return false;
+    if (libraryFilter === 'reading') return status === 'reading';
+    if (libraryFilter === 'want') return status === 'to_be_read';
+    if (libraryFilter === 'read') return status === 'finished';
+    return true;
+  });
+  const filteredBooks = shelfBooks.filter((b) => {
     const matchesSearch =
       b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       b.author_name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -432,10 +457,10 @@ export const SavedView: React.FC<SavedViewProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
               <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
                 {[
-                  { id: 'all', label: isAmharic ? 'ሁሉም' : 'All', count: books.length },
-                  { id: 'reading', label: isAmharic ? 'በማንበብ ላይ' : 'Reading', count: 0 },
-                  { id: 'want', label: 'TBR', count: 0 },
-                  { id: 'read', label: isAmharic ? 'የተነበረ' : 'Read', count: 0 }
+                  { id: 'all', label: isAmharic ? 'ሁሉም' : 'All', count: userLibrary.length },
+                  { id: 'reading', label: isAmharic ? 'በማንበብ ላይ' : 'Reading', count: userLibrary.filter((entry) => entry.status === 'reading').length },
+                  { id: 'want', label: 'TBR', count: userLibrary.filter((entry) => entry.status === 'to_be_read').length },
+                  { id: 'read', label: isAmharic ? 'የተነበበ' : 'Read', count: userLibrary.filter((entry) => entry.status === 'finished').length }
                 ].map((filter) => (
                   <button
                     key={filter.id}
@@ -492,7 +517,9 @@ export const SavedView: React.FC<SavedViewProps> = ({
               </div>
             </div>
 
-            {filteredBooks.length === 0 ? (
+            {userId && isLibraryPending ? (
+              <p className="py-12 text-center text-sm text-theme-muted">Loading your library?</p>
+            ) : filteredBooks.length === 0 ? (
               <div className="text-center py-16 border border-dashed border-theme rounded-2xl p-8 bg-theme-subtle/30">
                 <span className="material-symbols-outlined text-4xl text-[#b89e6c] dark:text-[#dfba4f] block mb-2 mx-auto">
                   local_library
@@ -543,9 +570,24 @@ export const SavedView: React.FC<SavedViewProps> = ({
                         <span className="text-[11px] text-theme-muted font-serif font-medium">
                           {isAmharic ? 'ሁኔታ:' : 'Status:'}
                         </span>
-                        <span className="text-xs font-serif text-theme-subtle italic">
-                          {isAmharic ? 'በቅርቡ' : 'Coming soon'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={libraryStatuses.get(book.id) ?? 'to_be_read'}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => {
+                              event.stopPropagation();
+                              if (!userId) return onShowToast('Sign in to update your library');
+                              setBookStatusMutation.mutate({ bookId: book.id, status: event.target.value as ReadingStatus });
+                            }}
+                            className="rounded-md border border-theme bg-theme-surface px-2 py-1 text-xs text-theme-main"
+                          >
+                            <option value="to_be_read">Want to Read</option>
+                            <option value="reading">Reading</option>
+                            <option value="finished">Finished</option>
+                            <option value="dnf">Did not finish</option>
+                          </select>
+                          <button type="button" onClick={(event) => { event.stopPropagation(); if (userId) removeBookMutation.mutate(book.id); }} className="text-xs text-red-600 hover:underline">Remove</button>
+                        </div>
                       </div>
                     </div>
                   </article>
@@ -670,8 +712,8 @@ export const SavedView: React.FC<SavedViewProps> = ({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (selectedBookForLibrary && onUpdateBookStatus) {
-                onUpdateBookStatus(selectedBookForLibrary, targetStatusForLibrary);
+              if (selectedBookForLibrary && userId) {
+                setBookStatusMutation.mutate({ bookId: selectedBookForLibrary, status: targetStatusForLibrary });
                 const bookObj = books.find((b) => b.id === selectedBookForLibrary);
                 const statusLabel =
                   targetStatusForLibrary === 'to_be_read'
