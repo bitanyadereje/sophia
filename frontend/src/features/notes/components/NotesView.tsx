@@ -31,8 +31,10 @@ export const NotesView: React.FC<NotesViewProps> = ({
   }, [bookId, initialBookId, books]);
 
   const { data: notes = [], isPending } = useQuery({
-    queryKey: ['notes', userId],
-    queryFn: () => loadNotes(userId!),
+    queryKey: bookFilterId
+      ? ['notes', 'book', userId, bookFilterId]
+      : ['notes', 'all', userId],
+    queryFn: () => loadNotes(userId!, bookFilterId),
     enabled: Boolean(userId),
   });
 
