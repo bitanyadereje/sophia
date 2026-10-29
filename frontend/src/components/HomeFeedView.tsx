@@ -89,7 +89,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
         discussionReplies: 0,
       }];
     }), [library, books]);
-  const finishedBooksCount = library.filter((entry) => entry.status === 'finished').length;
   const { data: recentInsights = [], isPending: areInsightsPending } = useQuery({
     queryKey: ['home-insights'],
     queryFn: async (): Promise<HomeInsight[]> => {
@@ -139,9 +138,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
   });
 
   // Contemplation state (customizable via reading logger)
-  const activeBook = readingTreatises[0]?.title ?? '';
-  const activeAuthor = readingTreatises[0]?.author ?? '';
-  const activeChapter = readingTreatises[0]?.location ?? '';
 
   const handleOpenBookDetail = (item: { id: string; title: string }) => {
     if (onSelectBook) {
@@ -155,10 +151,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
   const [isLoggerModalOpen, setIsLoggerModalOpen] = useState(false);
   const [loggerBook, setLoggerBook] = useState('');
   const [loggerPagesRead, setLoggerPagesRead] = useState(12);
-
-  // Target Goal Adjustment Modal
-  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
-  const [tempGoal, setTempGoal] = useState(user.goalTarget);
 
   // Write Notes Modal
   const [activeNotesBook, setActiveNotesBook] = useState<{
@@ -191,15 +183,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
     setIsLoggerModalOpen(false);
   };
 
-  const handleSaveGoal = () => {
-    if (onUpdateUser) {
-      onUpdateUser({ goalTarget: tempGoal });
-    }
-    setIsGoalModalOpen(false);
-    if (onShowToast) {
-      onShowToast(`Annual reading target set to ${tempGoal} volumes`);
-    }
-  };
+
 
   const handleSaveNote = () => {
     if (!newNoteText.trim()) {
@@ -240,32 +224,16 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
             </span>
           </div>
 
-          {/* Reading Streak & Annual Volumes (From Library requirements) */}
+          {/* Reading Actions */}
           <div className="mt-3 lg:mt-4 flex items-center justify-between flex-wrap gap-2 text-xs lg:text-sm font-sans text-theme-muted">
-            <div className="flex items-center gap-2 lg:gap-3">
-              <span className="text-theme-accent font-serif font-semibold">
-                {currentUserId && isLibraryPending ? '...' : finishedBooksCount} {isAmharic ? 'የተጠናቀቁ መጻሕፍት' : 'books finished'}
-              </span>
-            </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setTempGoal(user.goalTarget);
-                  setIsGoalModalOpen(true);
-                }}
-                className="px-3 lg:px-3.5 py-1 lg:py-1.5 rounded-full bg-theme-surface border border-theme text-xs lg:text-sm font-serif text-theme-muted hover:text-theme-main hover:bg-theme-subtle inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              >
-                <span className="material-symbols-outlined text-[15px] lg:text-[17px] text-theme-accent">flag</span>
-                <span>{isAmharic ? 'ግብ:' : 'Goal:'} {user.goalTarget} {isAmharic ? 'መጻሕፍት' : 'books'}</span>
-              </button>
               <button
                 type="button"
                 onClick={() => {
                   setLoggerBook(readingTreatises[0]?.id ?? '');
                   setIsLoggerModalOpen(true);
                 }}
-                disabled={!activeBook}
+                disabled={readingTreatises.length === 0}
                 className="px-3 lg:px-3.5 py-1 lg:py-1.5 rounded-full bg-theme-accent text-white text-xs lg:text-sm font-serif font-medium hover:bg-theme-accent/90 inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
               >
                 <span className="material-symbols-outlined text-[15px] lg:text-[17px]">add</span>
@@ -275,64 +243,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
           </div>
         </header>
 
-        {/* ========================================================================= */}
-        {/* 2. THE "ACTIVE CONTEMPLATION" ANCHOR                                      */}
-        {/* ========================================================================= */}
-        <section
-          id="active-contemplation-anchor"
-          aria-label="Active Contemplation"
-          className="bg-theme-surface border border-theme rounded-2xl p-6 sm:p-7 lg:p-10 shadow-xs text-center relative overflow-hidden"
-        >
-          <div className="inline-flex items-center gap-1.5 px-3 py-0.5 lg:py-1 rounded-full text-[10px] lg:text-xs font-sans font-semibold uppercase tracking-wider bg-theme-accent-light text-theme-accent border border-theme mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-theme-accent animate-pulse" />
-            {isAmharic ? 'ገባሪ ንባብ' : 'Active Lectio'}
-          </div>
-          <h2 className="font-serif text-xl sm:text-2xl lg:text-3xl xl:text-[32px] text-theme-main font-semibold leading-snug max-w-xl lg:max-w-3xl mx-auto">
-            {activeBook ? (isAmharic ? (
-              <>
-                {user.name}፣ በ<span className="italic font-bold text-theme-accent">{activeBook}</span> {activeChapter} ላይ ነዎት።
-              </>
-            ) : (
-              <>
-                {user.name}, you are reading{' '}
-                <span className="italic font-bold text-theme-accent">{activeBook}</span>.
-              </>
-            )) : (isAmharic ? 'ከቤተ-መጻሕፍትዎ መጽሐፍ ይምረጡ' : 'Choose a book to start reading.')}
-          </h2>
-          <p className="text-xs sm:text-sm lg:text-base text-theme-muted font-serif mt-1 lg:mt-2">
-            {activeBook ? `${activeAuthor} · ${activeChapter}` : 'Books marked Reading will appear here.'}
-          </p>
 
-          <div className="mt-5 lg:mt-7 flex items-center justify-center gap-3 flex-wrap">
-            <button
-              id="resume-study-btn"
-              type="button"
-              disabled={!activeBook}
-              onClick={() => {
-                const currentBook = readingTreatises[0];
-                if (currentBook) handleOpenBookDetail(currentBook);
-              }}
-              className="px-4 lg:px-5 py-2.5 lg:py-3 rounded-xl bg-theme-main text-white font-serif text-xs sm:text-sm lg:text-base font-semibold hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2 shadow-sm cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px] lg:text-[20px]">auto_stories</span>
-              <span>{isAmharic ? 'መጽሐፉን ክፈት' : 'Open Book'}</span>
-            </button>
-
-            <button
-              id="log-reading-btn"
-              type="button"
-              disabled={!activeBook}
-              onClick={() => {
-                setLoggerBook(readingTreatises[0]?.id ?? '');
-                setIsLoggerModalOpen(true);
-              }}
-              className="px-4 lg:px-5 py-2.5 lg:py-3 rounded-xl bg-theme-surface border border-theme text-theme-main font-serif text-xs sm:text-sm lg:text-base font-semibold hover:bg-theme-subtle active:scale-[0.98] transition-all inline-flex items-center gap-2 shadow-2xs cursor-pointer disabled:opacity-50"
-            >
-              <span className="material-symbols-outlined text-[18px] lg:text-[20px] text-theme-accent">menu_book</span>
-              <span>{isAmharic ? 'ንባብ መዝግብ' : 'Log Reading'}</span>
-            </button>
-          </div>
-        </section>
 
         {/* ========================================================================= */}
         {/* 3. CURRENTLY READING SECTION                                              */}
@@ -664,75 +575,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                 className="px-4 py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 text-xs font-serif tracking-wide hover:bg-stone-700 dark:hover:bg-stone-600 transition-colors shadow-xs cursor-pointer"
               >
                 Join Seminar →
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Adjust Goal Modal */}
-      {isGoalModalOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={() => setIsGoalModalOpen(false)}
-        >
-          <div
-            className="w-full max-w-sm bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-theme pb-3">
-              <h3 className="font-serif font-bold text-base text-theme-main">
-                Annual Reading Target
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsGoalModalOpen(false)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                aria-label="Close dialog"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
-
-            <div className="flex items-center justify-center gap-6 py-4 bg-theme-subtle rounded-xl border border-theme">
-              <button
-                type="button"
-                onClick={() => setTempGoal(Math.max(1, tempGoal - 1))}
-                className="w-9 h-9 rounded-lg bg-theme-surface border border-theme text-base font-serif hover:bg-theme-muted cursor-pointer flex items-center justify-center"
-              >
-                −
-              </button>
-              <div className="text-center">
-                <span className="font-serif text-2xl font-bold text-theme-main">{tempGoal}</span>
-                <span className="block text-[10px] uppercase tracking-wider text-theme-muted mt-0.5">
-                  Volumes
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setTempGoal(tempGoal + 1)}
-                className="w-9 h-9 rounded-lg bg-theme-surface border border-theme text-base font-serif hover:bg-theme-muted cursor-pointer flex items-center justify-center"
-              >
-                +
-              </button>
-            </div>
-
-            <div className="flex gap-2 pt-2 border-t border-theme">
-              <button
-                type="button"
-                onClick={() => setIsGoalModalOpen(false)}
-                className="flex-1 py-2 rounded-lg bg-theme-subtle text-theme-muted text-xs font-serif cursor-pointer hover:text-theme-main"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveGoal}
-                className="flex-1 py-2 rounded-lg bg-theme-main text-theme-surface text-xs font-serif tracking-wide hover:opacity-90 cursor-pointer"
-              >
-                Save Target
               </button>
             </div>
           </div>
