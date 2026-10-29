@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ScreenId, UserProfile, Book, DialecticComment, Question, ReadingPath, Review, Bookmark, ThemeMode } from './types';
+import { ScreenId, UserProfile, Book, DialecticComment, Question, Review, Bookmark, ThemeMode } from './types';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { HomeFeedView } from './components/HomeFeedView';
@@ -32,7 +32,6 @@ const INITIAL_USER: UserProfile = {
 };
 const INITIAL_COLLOQUIUM_COMMENTS: DialecticComment[] = [];
 const INITIAL_QUESTIONS: Question[] = [];
-const INITIAL_PATHS: ReadingPath[] = [];
 const INITIAL_REVIEWS: Review[] = [];
 const INITIAL_BOOKMARKS: Bookmark[] = [];
 
@@ -50,6 +49,7 @@ export const App: React.FC = () => {
 
   // --- ROUTING TARGETS ---
   const [selectedBookId, setSelectedBookId] = useState<string>('');
+  const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
   const [targetQuestionId, setTargetQuestionId] = useState<string | null>(null);
   const [targetReviewId, setTargetReviewId] = useState<string | null>(null);
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
@@ -63,7 +63,6 @@ export const App: React.FC = () => {
   const [questions, setQuestions] = useState<Question[]>(INITIAL_QUESTIONS);
   const [colloquiumComments, setColloquiumComments] = useState<DialecticComment[]>(INITIAL_COLLOQUIUM_COMMENTS);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(INITIAL_BOOKMARKS);
-  const [paths, setPaths] = useState<ReadingPath[]>(INITIAL_PATHS);
 
   const showToast = (msg: string) => setToastMessage(msg);
 
@@ -376,7 +375,9 @@ export const App: React.FC = () => {
 
         {currentScreen === 'paths' && (
           <PathsView
-            paths={paths} isDetailView={false}
+            isDetailView={false}
+            selectedPathId={selectedPathId}
+            onSelectPath={setSelectedPathId}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onShowToast={showToast}
           />
@@ -384,7 +385,9 @@ export const App: React.FC = () => {
 
         {currentScreen === 'path-detail' && (
           <PathsView
-            paths={paths} isDetailView={true}
+            isDetailView={true}
+            selectedPathId={selectedPathId}
+            onSelectPath={setSelectedPathId}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onShowToast={showToast}
           />
@@ -463,7 +466,7 @@ export const App: React.FC = () => {
       <SearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
-        books={books} questions={questions} paths={paths} authUserId={authUserId}
+        books={books} questions={questions} authUserId={authUserId}
         onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
       />
 
