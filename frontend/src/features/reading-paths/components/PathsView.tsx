@@ -1,22 +1,35 @@
 import React, { useState } from 'react';
-import { ReadingPath, ScreenId } from '../../../types';
+import { useQuery } from '@tanstack/react-query';
+import { ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
+import { loadReadingPathBooks, loadReadingPaths } from '../path.service';
 
 interface PathsViewProps {
-  paths: ReadingPath[];
   isDetailView: boolean;
+  selectedPathId?: string | null;
+  onSelectPath: (pathId: string) => void;
   onNavigate: (screen: ScreenId) => void;
   onShowToast: (msg: string) => void;
 }
 
 export const PathsView: React.FC<PathsViewProps> = ({
-  paths,
   isDetailView,
+  selectedPathId,
+  onSelectPath,
   onNavigate,
   onShowToast
 }) => {
   const { isAmharic } = useLanguage();
-  const [activePath, setActivePath] = useState<ReadingPath | null>(paths[0] || null);
+  const { data: paths = [], isPending: isPathsPending } = useQuery({
+    queryKey: ['reading-paths'],
+    queryFn: loadReadingPaths,
+  });
+  const activePath = paths.find((path) => path.id === selectedPathId) ?? paths[0] ?? null;
+  const { data: pathBooks = [], isPending: arePathBooksPending } = useQuery({
+    queryKey: ['reading-path-books', activePath?.id],
+    queryFn: () => loadReadingPathBooks(activePath!.id),
+    enabled: isDetailView && Boolean(activePath?.id),
+  });
   const [isFollowing, setIsFollowing] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState<'All' | 'Patristic' | 'Monastic' | 'Historical'>('All');
 
@@ -46,7 +59,13 @@ export const PathsView: React.FC<PathsViewProps> = ({
   // DETAIL VIEW: REFINED SYLLABUS & STATIONS
   // =========================================================================
   if (isDetailView) {
-    if (!activePath) return null;
+    if (!activePath) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-theme-app pt-16 text-sm text-theme-muted">
+          {isPathsPending ? 'Loading reading path...' : 'Reading path not found.'}
+        </div>
+      );
+    }
 
     return (
       <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
@@ -105,10 +124,30 @@ export const PathsView: React.FC<PathsViewProps> = ({
               <h2 className="text-[11px] font-sans font-semibold uppercase tracking-[0.25em] text-theme-muted whitespace-nowrap">READING ITINERARY</h2>
               <div className="h-px bg-theme w-full flex-1" />
             </div>
-            <article className="bg-theme-surface border border-theme rounded-xl p-4 sm:p-5 shadow-xs flex flex-col gap-3">
-              <h3 className="font-serif text-base sm:text-lg font-semibold text-theme-main">{activePath.title}</h3>
-              <p className="text-xs sm:text-sm text-theme-body font-serif leading-relaxed">{activePath.description || (isAmharic ? '???? ???' : 'No description available.')}</p>
-            </article>
+            {arePathBooksPending ? (
+              <p className="py-8 text-center text-sm text-theme-muted">Loading books...</p>
+            ) : pathBooks.length === 0 ? (
+              <article className="bg-theme-surface border border-theme rounded-xl p-4 sm:p-5 shadow-xs">
+                <p className="text-xs sm:text-sm text-theme-body font-serif leading-relaxed">No books have been added to this reading path yet.</p>
+              </article>
+            ) : pathBooks.map((pathBook) => {
+              const book = Array.isArray(pathBook.book) ? pathBook.book[0] : pathBook.book;
+              return (
+                <article key={pathBook.book_id} className="bg-theme-surface border border-theme rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
+                  {book?.cover_url ? (
+                    <img src={book.cover_url} alt={book.title} className="h-20 w-14 rounded object-cover" />
+                  ) : (
+                    <div className="flex h-20 w-14 items-center justify-center rounded bg-theme-subtle text-center text-[9px] text-theme-muted">{book?.title || `Book ${pathBook.position}`}</div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider text-theme-accent">Station {pathBook.position}</p>
+                    <h3 className="font-serif text-base sm:text-lg font-semibold text-theme-main">{book?.title || 'Untitled book'}</h3>
+                    {book?.author_name && <p className="text-xs text-theme-muted">{book.author_name}</p>}
+                    {pathBook.note && <p className="mt-1 text-xs text-theme-body font-serif leading-relaxed">{pathBook.note}</p>}
+                  </div>
+                </article>
+              );
+            })}
           </section>
         </div>
       </div>
@@ -157,7 +196,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
 
               <h3
                 onClick={() => {
-                  setActivePath(enrolledPath);
+                  onSelectPath(enrolledPath.id);
                   onNavigate('path-detail');
                 }}
                 className="font-serif text-xl sm:text-2xl lg:text-3xl font-semibold text-theme-main hover:text-theme-accent cursor-pointer transition-colors"
@@ -178,7 +217,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setActivePath(enrolledPath);
+                    onSelectPath(enrolledPath.id);
                     onNavigate('path-detail');
                   }}
                   className="px-4 lg:px-5 py-2 lg:py-2.5 rounded-xl bg-theme-main text-white font-serif text-xs sm:text-sm lg:text-base font-semibold hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
@@ -228,7 +267,9 @@ export const PathsView: React.FC<PathsViewProps> = ({
 
           {/* Curricula Cards */}
           <div className="space-y-3 lg:space-y-4">
-            {filteredPaths.map((path) => (
+            {isPathsPending ? (
+              <p className="py-8 text-center text-sm text-theme-muted">Loading reading paths...</p>
+            ) : filteredPaths.map((path) => (
               <article
                 key={path.id}
                 className="bg-theme-surface border border-theme rounded-xl p-4 sm:p-5 lg:p-6 shadow-xs hover:border-theme-accent/60 hover:shadow-sm transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
@@ -242,7 +283,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
 
                   <h3
                     onClick={() => {
-                      setActivePath(path);
+                      onSelectPath(path.id);
                       onNavigate('path-detail');
                     }}
                     className="font-serif text-base sm:text-lg lg:text-xl xl:text-2xl font-semibold text-theme-main hover:text-theme-accent cursor-pointer transition-colors"
@@ -263,7 +304,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setActivePath(path);
+                      onSelectPath(path.id);
                       onNavigate('path-detail');
                     }}
                     className="px-3.5 lg:px-4 py-2 lg:py-2.5 rounded-xl border border-theme bg-theme-surface hover:bg-theme-subtle text-theme-main font-serif text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition-all shadow-2xs hover:border-theme-accent cursor-pointer whitespace-nowrap"
@@ -276,7 +317,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
             ))}
           </div>
 
-          {filteredPaths.length === 0 && (
+          {!isPathsPending && filteredPaths.length === 0 && (
             <div className="py-12 text-center text-xs font-serif italic text-theme-muted bg-theme-surface border border-theme rounded-xl">
               {isAmharic ? 'ለዚህ ማጣሪያ ምንም የንባብ እቅድ አልተገኘም።' : 'No reading plans found for this filter.'}
             </div>
