@@ -255,6 +255,7 @@ export interface Question {
   author: string;
   authorAvatar: string;
   timeAgo: string;
+  createdAt?: string;
   topic: 'Early Texts' | 'Philosophy' | 'Reflections' | 'History';
   title: string;
   body: string;
