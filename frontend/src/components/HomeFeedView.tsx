@@ -1,9 +1,33 @@
-import React, { useState } from 'react';
-import { Book, ScreenId, UserProfile } from '../types';
+import React, { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Book, Review, ScreenId, UserProfile } from '../types';
 import { useLanguage } from '../context/LanguageContext';
+import { loadUserLibrary, updateBookStatus } from '../features/library/library.service';
+import { loadDiscussionsWithAuthors, loadAllReplies, loadDiscussionTopics } from '../features/discussions/services/discussion.service';
+import { loadReviews } from '../features/reviews/review.service';
+import { loadReviewerProfilesForReviews } from '../features/reviews/reviewerProfiles';
+
+interface ReadingTreatise {
+  id: string;
+  title: string;
+  author: string;
+  location: string;
+  progress: number;
+  discussionPrompt: string;
+  discussionReplies: number;
+}
+
+interface HomeInsight {
+  id: string;
+  kind: 'discussion' | 'review';
+  title: string;
+  meta: string;
+  createdAt: string;
+}
 
 interface HomeFeedViewProps {
   user?: UserProfile;
+  userId?: string | null;
   books?: Book[];
   onUpdateUser?: (updated: Partial<UserProfile>) => void;
   onNavigate: (screen: ScreenId) => void;
@@ -16,18 +40,20 @@ interface HomeFeedViewProps {
 
 export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
   user = {
+    id: '',
     name: 'Caleb',
     title: 'Monastic Scholar',
     location: 'Oxford, UK',
     memberSince: '2023',
     avatar: '',
-    booksRead: 14,
-    notesCount: 42,
-    dayStreak: 12,
+    booksRead: 0,
+    notesCount: 0,
+    dayStreak: 0,
     goalTarget: 24,
     topics: ['Patristics', 'Early Church']
   },
-  books: _books = [],
+  userId,
+  books = [],
   onUpdateUser,
   onNavigate,
   onSelectBook,
@@ -36,66 +62,99 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
   onNavigateToDiscussion,
   onNavigateToReview
 }) => {
-  const { t, isAmharic } = useLanguage();
+  const { isAmharic } = useLanguage();
+  const queryClient = useQueryClient();
+  const currentUserId = userId ?? user.id;
+  const { data: library = [], isPending: isLibraryPending } = useQuery({
+    queryKey: ['library', currentUserId],
+    queryFn: () => loadUserLibrary(currentUserId!),
+    enabled: Boolean(currentUserId),
+  });
+  const readingTreatises = useMemo<ReadingTreatise[]>(() => library
+    .filter((entry) => entry.status === 'reading')
+    .flatMap((entry) => {
+      const book = books.find((candidate) => candidate.id === entry.book_id);
+      if (!book) return [];
+      const progress = book.page_count
+        ? Math.min(100, Math.round((entry.pages_read / book.page_count) * 100))
+        : 0;
+      const location = entry.pages_read ? `Page ${entry.pages_read}` : 'In progress';
+      return [{
+        id: book.id,
+        title: book.title,
+        author: book.author_name,
+        location,
+        progress,
+        discussionPrompt: `Discuss ${book.title}`,
+        discussionReplies: 0,
+      }];
+    }), [library, books]);
+  const finishedBooksCount = library.filter((entry) => entry.status === 'finished').length;
+  const { data: recentInsights = [], isPending: areInsightsPending } = useQuery({
+    queryKey: ['home-insights'],
+    queryFn: async (): Promise<HomeInsight[]> => {
+      const [posts, replies, reviews] = await Promise.all([
+        loadDiscussionsWithAuthors(),
+        loadAllReplies(),
+        loadReviews(),
+      ]);
+      const [topics, reviewerProfiles] = await Promise.all([
+        loadDiscussionTopics(posts.map((post) => post.id)),
+        loadReviewerProfilesForReviews(reviews),
+      ]);
+      const discussionInsights: HomeInsight[] = posts.map((post) => ({
+        id: post.id,
+        kind: 'discussion',
+        title: post.title || post.content,
+        meta: `${topics[post.id] || 'Discussion'} · ${replies.filter((reply) => reply.parent_id === post.id).length} replies`,
+        createdAt: post.created_at,
+      }));
+      const reviewInsights: HomeInsight[] = reviews.map((review: Review) => {
+        const reviewer = reviewerProfiles[review.user_id];
+        const bookTitle = books.find((book) => book.id === review.book_id)?.title;
+        return {
+          id: review.id,
+          kind: 'review',
+          title: review.title || (bookTitle ? `Review: ${bookTitle}` : review.content),
+          meta: `★ ${review.rating}/5 · ${reviewer?.name || 'Reader'}`,
+          createdAt: review.created_at,
+        };
+      });
+      return [...discussionInsights, ...reviewInsights]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 5);
+    },
+  });
+  const readingLogMutation = useMutation({
+    mutationFn: (values: { bookId: string; pagesRead: number }) => {
+      const row = library.find((entry) => entry.book_id === values.bookId);
+      if (!currentUserId || !row) throw new Error('Reading book is unavailable');
+      return updateBookStatus(currentUserId, values.bookId, 'reading', row.pages_read + values.pagesRead);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['library', currentUserId] });
+      onShowToast?.('Reading progress recorded');
+    },
+    onError: () => onShowToast?.('Could not save reading progress'),
+  });
 
   // Contemplation state (customizable via reading logger)
-  const [activeBook, setActiveBook] = useState('On the Incarnation');
-  const [activeAuthor, setActiveAuthor] = useState('St. Athanasius of Alexandria');
-  const [activeChapter, setActiveChapter] = useState('Chapter 4: The Divine Dilemma');
-
-  // Currently Reading Items
-  const [readingTreatises, setReadingTreatises] = useState([
-    {
-      id: 'conf-4',
-      title: 'The Confessions',
-      author: 'Augustine of Hippo',
-      location: 'Book VIII',
-      chapterTarget: 'Book VIII: The Conversion in the Garden',
-      progress: 85,
-      pagesReadTotal: 238,
-      discussionPrompt: 'How does Augustine define the conflict of two wills in Book VIII?',
-      discussionReplies: 24
-    },
-    {
-      id: 'inc-1',
-      title: 'On the Incarnation',
-      author: 'Athanasius of Alexandria',
-      location: 'Ch. IV',
-      chapterTarget: 'Chapter 4: The Divine Dilemma',
-      progress: 68,
-      pagesReadTotal: 142,
-      discussionPrompt: 'Why does Athanasius insist that repentance alone cannot cure ontological corruption?',
-      discussionReplies: 18
-    }
-  ]);
+  const activeBook = readingTreatises[0]?.title ?? '';
+  const activeAuthor = readingTreatises[0]?.author ?? '';
+  const activeChapter = readingTreatises[0]?.location ?? '';
 
   const handleOpenBookDetail = (item: { id: string; title: string }) => {
-    let targetId = item.id;
-    if (_books && _books.length > 0) {
-      const match = _books.find(
-        (b) => b.id === item.id || b.title.toLowerCase() === item.title.toLowerCase()
-      );
-      if (match) targetId = match.id;
-    }
-    if (targetId === 'confessions') targetId = 'conf-4';
-    if (targetId === 'incarnation') targetId = 'inc-1';
-
     if (onSelectBook) {
-      onSelectBook(targetId);
+      onSelectBook(item.id);
     } else {
       onNavigate('colloquium');
     }
   };
 
-  // Progressive disclosure sheet state
-  const [isResumeSheetOpen, setIsResumeSheetOpen] = useState(false);
-
   // Reading Logger Modal State ("the user can add how many pages they read and if they are on a chapter")
   const [isLoggerModalOpen, setIsLoggerModalOpen] = useState(false);
-  const [loggerBook, setLoggerBook] = useState('On the Incarnation');
-  const [loggerChapter, setLoggerChapter] = useState('Chapter 4: The Divine Dilemma');
+  const [loggerBook, setLoggerBook] = useState('');
   const [loggerPagesRead, setLoggerPagesRead] = useState(12);
-  const [loggerNote, setLoggerNote] = useState('');
 
   // Target Goal Adjustment Modal
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
@@ -110,63 +169,25 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
 
   // Discussion Modal
   const [activeDiscussionBook, setActiveDiscussionBook] = useState<{
+    id: string;
     title: string;
     location: string;
     prompt: string;
     repliesCount: number;
   } | null>(null);
 
-  // Active insight inspection modal state
-  const [activeItemModal, setActiveItemModal] = useState<
-    | { type: 'discussion-grace'; title: string; meta: string }
-    | { type: 'review-augustine'; title: string; meta: string }
-    | { type: 'discussion-atonement'; title: string; meta: string }
-    | null
-  >(null);
-
-  // Private marginalia state
-  const [marginaliaText, setMarginaliaText] = useState(
-    'Note on §4.2: Athanasius argues that the corruption of human nature was an ontological catastrophe, not merely a legal transgression. God could not abandon His creation to non-existence, yet human repentance alone could not regenerate corruptible mortal flesh. The Incarnation is therefore cosmic restoration, not merely a court pardon.'
-  );
-  const [isEditingMarginalia, setIsEditingMarginalia] = useState(false);
-
   // Handlers
   const handleSaveReadingLog = (e: React.FormEvent) => {
     e.preventDefault();
     const pages = Number(loggerPagesRead) || 0;
-
-    // Update active anchor if it matches
-    if (loggerBook === 'On the Incarnation') {
-      setActiveChapter(loggerChapter);
+    const selected = readingTreatises.find((item) => item.id === loggerBook);
+    if (selected && currentUserId && pages > 0) {
+      readingLogMutation.mutate({ bookId: selected.id, pagesRead: pages });
+    } else if (!currentUserId) {
+      onShowToast?.('Sign in to save reading progress');
+    } else {
+      onShowToast?.('Choose a book from your Currently Reading shelf');
     }
-
-    // Update the progress percentage of the treatise
-    setReadingTreatises((prev) =>
-      prev.map((t) => {
-        if (t.title.toLowerCase().includes(loggerBook.toLowerCase())) {
-          const newProgress = Math.min(100, t.progress + Math.max(2, Math.round(pages / 3)));
-          return {
-            ...t,
-            location: loggerChapter,
-            chapterTarget: loggerChapter,
-            progress: newProgress,
-            pagesReadTotal: t.pagesReadTotal + pages
-          };
-        }
-        return t;
-      })
-    );
-
-    // Update streak and show toast
-    if (onUpdateUser) {
-      onUpdateUser({ dayStreak: user.dayStreak });
-    }
-
-    if (onShowToast) {
-      onShowToast(`Recorded ${pages} pages read in ${loggerChapter}. Streak active at ${user.dayStreak} days!`);
-    }
-
-    setLoggerNote('');
     setIsLoggerModalOpen(false);
   };
 
@@ -223,12 +244,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
           <div className="mt-3 lg:mt-4 flex items-center justify-between flex-wrap gap-2 text-xs lg:text-sm font-sans text-theme-muted">
             <div className="flex items-center gap-2 lg:gap-3">
               <span className="text-theme-accent font-serif font-semibold">
-                {user.booksRead} {isAmharic ? 'በዚህ ዓመት የተነበቡ ጥራዞች' : 'volumes read this year'}
-              </span>
-              <span className="opacity-40">•</span>
-              <span className="inline-flex items-center gap-1 font-medium text-theme-main px-2.5 lg:px-3 py-0.5 lg:py-1 rounded-full bg-theme-surface border border-theme shadow-2xs">
-                <span className="material-symbols-outlined text-[15px] lg:text-[17px] text-theme-accent">local_fire_department</span>
-                <span>{user.dayStreak} {isAmharic ? 'የተከታታይ ቀናት' : '-day streak'}</span>
+                {currentUserId && isLibraryPending ? '...' : finishedBooksCount} {isAmharic ? 'የተጠናቀቁ መጻሕፍት' : 'books finished'}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -245,8 +261,12 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setIsLoggerModalOpen(true)}
-                className="px-3 lg:px-3.5 py-1 lg:py-1.5 rounded-full bg-theme-accent text-white text-xs lg:text-sm font-serif font-medium hover:bg-theme-accent/90 inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                onClick={() => {
+                  setLoggerBook(readingTreatises[0]?.id ?? '');
+                  setIsLoggerModalOpen(true);
+                }}
+                disabled={!activeBook}
+                className="px-3 lg:px-3.5 py-1 lg:py-1.5 rounded-full bg-theme-accent text-white text-xs lg:text-sm font-serif font-medium hover:bg-theme-accent/90 inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
               >
                 <span className="material-symbols-outlined text-[15px] lg:text-[17px]">add</span>
                 <span>{isAmharic ? 'ንባብ መዝግብ' : 'Log Reading'}</span>
@@ -268,41 +288,45 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
             {isAmharic ? 'ገባሪ ንባብ' : 'Active Lectio'}
           </div>
           <h2 className="font-serif text-xl sm:text-2xl lg:text-3xl xl:text-[32px] text-theme-main font-semibold leading-snug max-w-xl lg:max-w-3xl mx-auto">
-            {isAmharic ? (
+            {activeBook ? (isAmharic ? (
               <>
-                {user.name}፣ በ<span className="italic font-bold text-theme-accent">{activeBook}</span> {activeChapter.split(':')[0]} ላይ ነዎት።
+                {user.name}፣ በ<span className="italic font-bold text-theme-accent">{activeBook}</span> {activeChapter} ላይ ነዎት።
               </>
             ) : (
               <>
-                {user.name}, you are on {activeChapter.split(':')[0]} of{' '}
+                {user.name}, you are reading{' '}
                 <span className="italic font-bold text-theme-accent">{activeBook}</span>.
               </>
-            )}
+            )) : (isAmharic ? 'ከቤተ-መጻሕፍትዎ መጽሐፍ ይምረጡ' : 'Choose a book to start reading.')}
           </h2>
           <p className="text-xs sm:text-sm lg:text-base text-theme-muted font-serif mt-1 lg:mt-2">
-            {activeAuthor} · {activeChapter}
+            {activeBook ? `${activeAuthor} · ${activeChapter}` : 'Books marked Reading will appear here.'}
           </p>
 
           <div className="mt-5 lg:mt-7 flex items-center justify-center gap-3 flex-wrap">
             <button
               id="resume-study-btn"
               type="button"
-              onClick={() => setIsResumeSheetOpen(true)}
+              disabled={!activeBook}
+              onClick={() => {
+                const currentBook = readingTreatises[0];
+                if (currentBook) handleOpenBookDetail(currentBook);
+              }}
               className="px-4 lg:px-5 py-2.5 lg:py-3 rounded-xl bg-theme-main text-white font-serif text-xs sm:text-sm lg:text-base font-semibold hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2 shadow-sm cursor-pointer"
             >
               <span className="material-symbols-outlined text-[18px] lg:text-[20px]">auto_stories</span>
-              <span>{isAmharic ? 'የንባብ ማስታወሻዎች' : 'Reading Notes'}</span>
+              <span>{isAmharic ? 'መጽሐፉን ክፈት' : 'Open Book'}</span>
             </button>
 
             <button
               id="log-reading-btn"
               type="button"
+              disabled={!activeBook}
               onClick={() => {
-                setLoggerBook(activeBook);
-                setLoggerChapter(activeChapter);
+                setLoggerBook(readingTreatises[0]?.id ?? '');
                 setIsLoggerModalOpen(true);
               }}
-              className="px-4 lg:px-5 py-2.5 lg:py-3 rounded-xl bg-theme-surface border border-theme text-theme-main font-serif text-xs sm:text-sm lg:text-base font-semibold hover:bg-theme-subtle active:scale-[0.98] transition-all inline-flex items-center gap-2 shadow-2xs cursor-pointer"
+              className="px-4 lg:px-5 py-2.5 lg:py-3 rounded-xl bg-theme-surface border border-theme text-theme-main font-serif text-xs sm:text-sm lg:text-base font-semibold hover:bg-theme-subtle active:scale-[0.98] transition-all inline-flex items-center gap-2 shadow-2xs cursor-pointer disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-[18px] lg:text-[20px] text-theme-accent">menu_book</span>
               <span>{isAmharic ? 'ንባብ መዝግብ' : 'Log Reading'}</span>
@@ -326,7 +350,14 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
           </div>
 
           <div className="space-y-3.5 lg:space-y-4">
-            {readingTreatises.map((item) => (
+            {currentUserId && isLibraryPending ? (
+              <p className="py-8 text-center text-sm text-theme-muted">Loading your reading list...</p>
+            ) : readingTreatises.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-theme p-6 text-center text-sm text-theme-muted">
+                <p>You have no books marked as currently reading.</p>
+                <button type="button" onClick={() => onNavigate('library')} className="mt-3 text-theme-accent hover:underline">Browse your library</button>
+              </div>
+            ) : readingTreatises.map((item) => (
               <article
                 key={item.id}
                 id={`reading-treatise-${item.id}`}
@@ -387,6 +418,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                     onClick={(e) => {
                       e.stopPropagation();
                       setActiveDiscussionBook({
+                        id: item.id,
                         title: item.title,
                         location: item.location,
                         prompt: item.discussionPrompt,
@@ -403,8 +435,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setLoggerBook(item.title);
-                      setLoggerChapter(item.location);
+                      setLoggerBook(item.id);
                       setIsLoggerModalOpen(true);
                     }}
                     className="px-3 lg:px-3.5 py-1.5 lg:py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 text-xs lg:text-sm font-serif font-semibold hover:bg-stone-700 dark:hover:bg-stone-600 inline-flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ml-auto"
@@ -435,86 +466,39 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
               onClick={() => onNavigate('discussions')}
               className="text-[11px] lg:text-xs font-sans text-theme-muted hover:text-theme-main transition-colors cursor-pointer"
             >
-              {isAmharic ? 'ሁሉንም ውይይቶች እይ →' : 'All Discussions →'}
+              {isAmharic ? 'ሁሉንም ውይይቶች እይ' : 'All Discussions'}
             </button>
           </div>
-
-          {/* Minimalist text rows separated by thin hairlines */}
           <div className="divide-y divide-theme border-t border-b border-theme">
-            {/* Item Row 1 (Discussion Link) */}
-            <article
-              id="feed-item-grace"
-              onClick={() => {
-                if (onNavigateToDiscussion) {
-                  onNavigateToDiscussion('q-grace-romans');
-                } else {
-                  onNavigate('discussions');
-                }
-              }}
-              className="py-4 lg:py-5 px-2 lg:px-3 hover:bg-theme-subtle/70 rounded-lg transition-colors cursor-pointer group flex items-center justify-between gap-3"
-            >
-              <div>
-                <h3 className="font-serif font-bold text-[15px] sm:text-base lg:text-lg xl:text-xl text-theme-main group-hover:text-theme-accent leading-snug transition-colors">
-                  How did the early church fathers interpret Grace in the Book of Romans?
-                </h3>
-                <p className="mt-1.5 text-xs lg:text-sm text-theme-muted font-sans font-normal tracking-tight">
-                  #ChurchHistory • 14 scholarly replies
-                </p>
-              </div>
-              <span className="material-symbols-outlined text-theme-subtle group-hover:text-theme-accent group-hover:translate-x-0.5 transition-all text-[18px] sm:text-[20px] flex-shrink-0">
-                arrow_forward
-              </span>
-            </article>
-
-            {/* Item Row 2 (Review Link) */}
-            <article
-              id="feed-item-augustine-review"
-              onClick={() => {
-                if (onNavigateToReview) {
-                  onNavigateToReview('rev-civ-god');
-                } else {
-                  onNavigate('reviews');
-                }
-              }}
-              className="py-4 lg:py-5 px-2 lg:px-3 hover:bg-theme-subtle/70 rounded-lg transition-colors cursor-pointer group flex items-center justify-between gap-3"
-            >
-              <div>
-                <h3 className="font-serif font-normal text-[15px] sm:text-base lg:text-lg xl:text-xl text-theme-main group-hover:text-theme-accent leading-snug transition-colors">
-                  REVIEW: St. Augustine&apos;s &apos;City of God&apos;
-                </h3>
-                <p className="mt-1.5 text-xs lg:text-sm text-theme-muted font-sans font-normal tracking-tight">
-                  ⭐⭐⭐⭐⭐ • Written by Dr. Moreau
-                </p>
-              </div>
-              <span className="material-symbols-outlined text-theme-subtle group-hover:text-theme-accent group-hover:translate-x-0.5 transition-all text-[18px] sm:text-[20px] flex-shrink-0">
-                arrow_forward
-              </span>
-            </article>
-
-            {/* Item Row 3 (Discussion Link) */}
-            <article
-              id="feed-item-atonement"
-              onClick={() => {
-                if (onNavigateToDiscussion) {
-                  onNavigateToDiscussion('q-atonement-patristic');
-                } else {
-                  onNavigate('discussions');
-                }
-              }}
-              className="py-4 lg:py-5 px-2 lg:px-3 hover:bg-theme-subtle/70 rounded-lg transition-colors cursor-pointer group flex items-center justify-between gap-3"
-            >
-              <div>
-                <h3 className="font-serif font-bold text-[15px] sm:text-base lg:text-lg xl:text-xl text-theme-main group-hover:text-theme-accent leading-snug transition-colors">
-                  Understanding the teaching of Atonement in the early church
-                </h3>
-                <p className="mt-1.5 text-xs lg:text-sm text-theme-muted font-sans font-normal tracking-tight">
-                  #Dogma • 4 scholarly replies
-                </p>
-              </div>
-              <span className="material-symbols-outlined text-theme-subtle group-hover:text-theme-accent group-hover:translate-x-0.5 transition-all text-[18px] sm:text-[20px] flex-shrink-0">
-                arrow_forward
-              </span>
-            </article>
+            {areInsightsPending ? (
+              <p className="py-6 text-center text-sm text-theme-muted">Loading recent insights...</p>
+            ) : recentInsights.length === 0 ? (
+              <p className="py-6 text-center text-sm text-theme-muted">No recent discussions or reviews yet.</p>
+            ) : recentInsights.map((insight) => (
+              <article
+                key={`${insight.kind}-${insight.id}`}
+                onClick={() => {
+                  if (insight.kind === 'review') {
+                    if (onNavigateToReview) onNavigateToReview(insight.id);
+                    else onNavigate('reviews');
+                  } else if (onNavigateToDiscussion) onNavigateToDiscussion(insight.id);
+                  else onNavigate('discussions');
+                }}
+                className="py-4 lg:py-5 px-2 lg:px-3 hover:bg-theme-subtle/70 rounded-lg transition-colors cursor-pointer group flex items-center justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <h3 className="font-serif font-bold text-[15px] sm:text-base lg:text-lg xl:text-xl text-theme-main group-hover:text-theme-accent leading-snug transition-colors line-clamp-2">
+                    {insight.title}
+                  </h3>
+                  <p className="mt-1.5 text-xs lg:text-sm text-theme-muted font-sans font-normal tracking-tight">
+                    {insight.kind === 'review' ? 'Review' : 'Discussion'} - {insight.meta}
+                  </p>
+                </div>
+                <span className="material-symbols-outlined text-theme-subtle group-hover:text-theme-accent group-hover:translate-x-0.5 transition-all text-[18px] sm:text-[20px] flex-shrink-0">
+                  arrow_forward
+                </span>
+              </article>
+            ))}
           </div>
         </section>
       </div>
@@ -540,7 +524,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                   DAILY STUDY LOG
                 </span>
                 <h3 className="font-serif font-bold text-base text-theme-main mt-0.5">
-                  Record Pages Read & Chapter
+                  Record Pages Read
                 </h3>
               </div>
               <button
@@ -560,33 +544,13 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                   value={loggerBook}
                   onChange={(e) => {
                     setLoggerBook(e.target.value);
-                    if (e.target.value === 'The Confessions') {
-                      setLoggerChapter('Book VIII: The Conversion in the Garden');
-                    } else {
-                      setLoggerChapter('Chapter 4: The Divine Dilemma');
-                    }
                   }}
                   className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main focus:outline-none focus:border-theme-accent"
                 >
-                  <option value="On the Incarnation">On the Incarnation (Athanasius)</option>
-                  <option value="The Confessions">The Confessions (Augustine)</option>
-                  <option value="City of God">City of God (Augustine)</option>
-                  <option value="The Rule of St. Benedict">The Rule of St. Benedict</option>
+                  {readingTreatises.map((item) => (
+                    <option key={item.id} value={item.id}>{item.title} ({item.author})</option>
+                  ))}
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-sans text-theme-muted mb-1">
-                  Current Chapter / Section:
-                </label>
-                <input
-                  type="text"
-                  value={loggerChapter}
-                  onChange={(e) => setLoggerChapter(e.target.value)}
-                  placeholder="e.g. Chapter 4: The Divine Dilemma"
-                  className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main focus:outline-none focus:border-theme-accent"
-                  required
-                />
               </div>
 
               <div>
@@ -609,18 +573,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-sans text-theme-muted mb-1">
-                  Marginal Reflection (Optional):
-                </label>
-                <textarea
-                  rows={3}
-                  value={loggerNote}
-                  onChange={(e) => setLoggerNote(e.target.value)}
-                  placeholder="Note a quick reflection on today's reading..."
-                  className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main leading-relaxed focus:outline-none focus:border-theme-accent resize-none"
-                />
-              </div>
             </div>
 
             <div className="pt-2 border-t border-theme flex items-center justify-end gap-2">
@@ -639,218 +591,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
               </button>
             </div>
           </form>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 6. PROGRESSIVE DISCLOSURE: RESUME STUDY SHEET                             */}
-      {/* ========================================================================= */}
-      {isResumeSheetOpen && (
-        <div
-          id="dashboard-sheet-backdrop"
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/50 flex flex-col justify-end transition-opacity duration-200"
-          onClick={() => setIsResumeSheetOpen(false)}
-        >
-          <div
-            id="organic-dashboard-sheet"
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg mx-auto bg-theme-surface text-theme-main rounded-t-3xl border-t border-theme p-6 sm:p-8 max-h-[85vh] overflow-y-auto shadow-2xl space-y-6 animate-in slide-in-from-bottom duration-300"
-          >
-            <div className="w-10 h-1 bg-theme-muted/50 rounded-full mx-auto" />
-
-            <div className="flex items-start justify-between border-b border-theme pb-4">
-              <div>
-                <p className="text-[10px] font-sans uppercase tracking-[0.25em] text-theme-muted">
-                  READING NOTES
-                </p>
-                <h3 className="font-serif font-bold text-lg sm:text-xl text-theme-main mt-0.5">
-                  {activeBook}
-                </h3>
-                <p className="text-xs text-theme-muted font-serif italic">
-                  {activeAuthor} • {activeChapter}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setIsResumeSheetOpen(false)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                aria-label="Close dialog"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
-
-            {/* Detailed Reading Metrics */}
-            <div className="space-y-3">
-              <h4 className="text-[11px] font-sans font-medium uppercase tracking-[0.2em] text-theme-muted">
-                READING METRICS
-              </h4>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-theme-subtle border border-theme rounded-xl p-3.5">
-                  <span className="block text-[10px] font-sans uppercase tracking-wider text-theme-muted">
-                    Current Position
-                  </span>
-                  <span className="font-serif font-bold text-base text-theme-main mt-0.5 block">
-                    Chapter 4 of 8
-                  </span>
-                  <span className="text-[11px] text-theme-muted mt-0.5 block font-sans">
-                    68% of treatise
-                  </span>
-                </div>
-
-                <div className="bg-theme-subtle border border-theme rounded-xl p-3.5">
-                  <span className="block text-[10px] font-sans uppercase tracking-wider text-theme-muted">
-                    Pacing
-                  </span>
-                  <span className="font-serif font-bold text-base text-theme-main mt-0.5 block">
-                    ~22 min
-                  </span>
-                  <span className="text-[11px] text-theme-muted mt-0.5 block font-sans">
-                    Contemplative pace
-                  </span>
-                </div>
-              </div>
-
-              <div className="text-xs text-theme-muted font-sans pt-1">
-                Last meditation session recorded: <span className="text-theme-main font-medium">Today at 9:40 AM</span>
-              </div>
-            </div>
-
-            {/* Private Personal Notes Section */}
-            <div className="space-y-3 pt-2 border-t border-theme">
-              <div className="flex items-center justify-between">
-                <h4 className="text-[11px] font-sans font-medium uppercase tracking-[0.2em] text-theme-muted">
-                  {isAmharic ? 'የግል ማስታወሻ (§4.2)' : 'PERSONAL NOTES (§4.2)'}
-                </h4>
-                <button
-                  type="button"
-                  onClick={() => setIsEditingMarginalia(!isEditingMarginalia)}
-                  className="text-[11px] font-serif text-theme-accent hover:underline cursor-pointer"
-                >
-                  {isEditingMarginalia ? (isAmharic ? 'አስቀምጥ' : 'Save') : (isAmharic ? 'ማስታወሻ አስተካክል' : 'Edit Note')}
-                </button>
-              </div>
-
-              {isEditingMarginalia ? (
-                <textarea
-                  rows={4}
-                  value={marginaliaText}
-                  onChange={(e) => setMarginaliaText(e.target.value)}
-                  className="w-full bg-theme-app border border-theme rounded-xl p-3 text-xs font-serif text-theme-main leading-relaxed focus:outline-none focus:border-theme-accent"
-                />
-              ) : (
-                <blockquote className="bg-theme-subtle border-l-2 border-theme-accent p-3.5 rounded-r-xl text-xs font-serif text-theme-body leading-relaxed italic">
-                  &ldquo;{marginaliaText}&rdquo;
-                </blockquote>
-              )}
-            </div>
-
-            {/* Primary Study Actions */}
-            <div className="pt-2 flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsResumeSheetOpen(false);
-                  setLoggerBook(activeBook);
-                  setLoggerChapter(activeChapter);
-                  setIsLoggerModalOpen(true);
-                }}
-                className="w-full py-3 rounded-xl bg-stone-800 dark:bg-stone-700 text-stone-100 font-serif text-sm font-semibold tracking-wide hover:bg-stone-700 dark:hover:bg-stone-600 transition-colors cursor-pointer shadow-xs flex items-center justify-center gap-2"
-              >
-                <span className="material-symbols-outlined text-[18px]">add</span>
-                <span>Log Reading on {activeBook}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsResumeSheetOpen(false);
-                  onNavigate('library');
-                }}
-                className="w-full py-2.5 rounded-xl bg-theme-subtle border border-theme text-theme-main font-serif text-xs tracking-wide hover:bg-theme-muted transition-colors cursor-pointer"
-              >
-                {isAmharic ? 'የተቀመጡ ማስታወሻዎችን እይ →' : 'View Saved Notes →'}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsResumeSheetOpen(false)}
-                className="w-full py-2 text-center text-xs font-serif text-theme-muted hover:text-theme-main cursor-pointer"
-              >
-                {isAmharic ? 'ወደ መነሻ ተመለስ' : 'Return to Home'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Note Editor Modal */}
-      {activeNotesBook && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={() => setActiveNotesBook(null)}
-        >
-          <div
-            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between border-b border-theme pb-3">
-              <div>
-                <span className="text-[10px] font-sans uppercase tracking-[0.25em] text-theme-muted block">
-                  {isAmharic ? 'የግል ማስታወሻ' : 'PERSONAL NOTES'}
-                </span>
-                <h3 className="font-serif font-bold text-base text-theme-main mt-0.5">
-                  {activeNotesBook.title}
-                </h3>
-                <p className="text-xs text-theme-muted font-serif italic">
-                  {activeNotesBook.location}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveNotesBook(null)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                aria-label="Close dialog"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-sans text-theme-muted block">
-                Write reflection or marginal note:
-              </label>
-              <textarea
-                rows={4}
-                value={newNoteText}
-                onChange={(e) => setNewNoteText(e.target.value)}
-                placeholder="Record your contemplation on this passage..."
-                className="w-full bg-theme-app border border-theme rounded-xl p-3 text-xs font-serif text-theme-main leading-relaxed focus:outline-none focus:border-theme-accent resize-none"
-              />
-            </div>
-
-            <div className="pt-2 border-t border-theme flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveNotesBook(null)}
-                className="px-4 py-2 text-xs font-serif text-theme-muted hover:text-theme-main cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveNote}
-                className="px-4 py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 text-xs font-serif tracking-wide hover:bg-stone-700 dark:hover:bg-stone-600 transition-colors shadow-xs cursor-pointer"
-              >
-                Save Reflection
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -911,7 +651,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  const targetId = (activeDiscussionBook as any).id === 'incarnation' ? 'inc-1' : 'conf-4';
+                  const targetId = activeDiscussionBook.id;
                   setActiveDiscussionBook(null);
                   if (onOpenSeminar) {
                     onOpenSeminar(targetId);
@@ -999,109 +739,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
         </div>
       )}
 
-      {/* Feed Item Reading Modal */}
-      {activeItemModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={() => setActiveItemModal(null)}
-        >
-          <div
-            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between border-b border-theme pb-3">
-              <div>
-                <span className="text-[10px] font-sans uppercase tracking-[0.25em] text-theme-muted block">
-                  COLLOQUIUM ARCHIVE
-                </span>
-                <span className="text-xs text-theme-muted font-sans mt-0.5 block">
-                  {activeItemModal.meta}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveItemModal(null)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                aria-label="Close dialog"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
-
-            <h3 className="font-serif font-bold text-base text-theme-main leading-snug">
-              {activeItemModal.title}
-            </h3>
-
-            {activeItemModal.type === 'discussion-grace' && (
-              <div className="space-y-3 text-xs font-serif text-theme-body leading-relaxed">
-                <p>
-                  In examining early patristic commentaries on Romans 3–8 (notably Ambrosiaster, Origen, and Chrysostom), grace is treated primarily as the unmerited re-creation of the broken human will rather than an impersonal forensic transfer.
-                </p>
-                <p className="text-theme-muted italic font-sans text-[11px]">
-                  14 responses from university scholars and monastic fellows recorded in the Colloquium.
-                </p>
-              </div>
-            )}
-
-            {activeItemModal.type === 'review-augustine' && (
-              <div className="space-y-3 text-xs font-serif text-theme-body leading-relaxed">
-                <blockquote className="border-l-2 border-theme-accent pl-3 italic text-theme-body">
-                  &ldquo;A magnum opus that dismantled the pagan civic theology of antiquity. Augustine contrasts the city of man, built on the love of self unto contempt of God, with the city of God, built on the love of God unto contempt of self.&rdquo;
-                </blockquote>
-                <p className="text-theme-muted font-sans text-[11px]">
-                  Assessed 5.0/5.0 by Dr. Moreau • Patristic Studies Chair.
-                </p>
-              </div>
-            )}
-
-            {activeItemModal.type === 'discussion-atonement' && (
-              <div className="space-y-3 text-xs font-serif text-theme-body leading-relaxed">
-                <p>
-                  Before late scholastic formulations of penal substitution, the dominant patristic understanding centered on Christus Victor and recapitulation—Christ restoring human nature by experiencing all its stages and swallowing mortality in His divine life.
-                </p>
-                <p className="text-theme-muted italic font-sans text-[11px]">
-                  4 scholarly replies cataloged under Dogma.
-                </p>
-              </div>
-            )}
-
-            <div className="pt-3 border-t border-theme flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setActiveItemModal(null)}
-                className="px-4 py-2 text-xs font-serif text-theme-muted hover:text-theme-main cursor-pointer"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const modalType = activeItemModal.type;
-                  setActiveItemModal(null);
-                  if (modalType === 'review-augustine') {
-                    if (onNavigateToReview) onNavigateToReview('rev-civ-god');
-                    else onNavigate('reviews');
-                  } else if (modalType === 'discussion-atonement') {
-                    if (onNavigateToDiscussion) onNavigateToDiscussion('q-atonement-patristic');
-                    else onNavigate('discussions');
-                  } else {
-                    if (onNavigateToDiscussion) onNavigateToDiscussion('q-grace-romans');
-                    else onNavigate('discussions');
-                  }
-                }}
-                className="px-4 py-2 rounded-lg bg-theme-main text-theme-surface text-xs font-serif tracking-wide hover:opacity-90 cursor-pointer inline-flex items-center gap-1.5"
-              >
-                <span>
-                  {activeItemModal.type === 'review-augustine' ? 'Open Book Review' : 'Open Discussion'}
-                </span>
-                <span className="material-symbols-outlined text-[15px]">arrow_forward</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
@@ -442,6 +442,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     author: post.author?.name || 'Reader',
     authorAvatar: post.author?.avatar_url || '',
     timeAgo: post.created_at ? new Date(post.created_at).toLocaleDateString() : '',
+    createdAt: post.created_at,
     topic: (post.topic || 'Reflections') as Question['topic'],
     title: post.title || 'Discussion',
     body: post.content || '',
@@ -643,26 +644,29 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     setIsNewQuestionModalOpen(false);
   };
 
-  const filteredQuestions = questions
-    .filter((q) => {
+  const sortedAndFilteredQuestions = useMemo(() => {
+    const filtered = questions.filter((q) => {
       if (selectedTopic !== 'All' && q.topic !== selectedTopic) return false;
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
         return (
           q.title.toLowerCase().includes(query) ||
           q.body.toLowerCase().includes(query) ||
-          q.author.toLowerCase().includes(query) ||
-          (q.bookTitle && q.bookTitle.toLowerCase().includes(query))
+          q.author.toLowerCase().includes(query)
         );
       }
       return true;
-    })
-    .sort((a, b) => {
+    });
+
+    return [...filtered].sort((a, b) => {
       if (sortBy === 'discussed') {
         return b.repliesCount - a.repliesCount;
       }
-      return 0;
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
     });
+  }, [questions, selectedTopic, searchQuery, sortBy]);
 
   const countAllReplies = (reps?: QuestionReply[]): number => {
     if (!reps) return 0;
@@ -1029,7 +1033,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredQuestions.map((q) => {
+              {sortedAndFilteredQuestions.map((q) => {
                 const isLiked = !!likedQuestions[q.id];
                 const isSaved = !!savedQuestions[q.id];
                 const likesCount = q.likesCount;
@@ -1141,7 +1145,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 );
               })}
 
-              {filteredQuestions.length === 0 && (
+              {sortedAndFilteredQuestions.length === 0 && (
                 <div className="col-span-full bg-theme-subtle rounded-xl p-8 text-center border border-theme mt-2">
                   <span className="material-symbols-outlined text-3xl text-theme-subtle mb-1">
                     search_off
