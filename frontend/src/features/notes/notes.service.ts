@@ -1,12 +1,11 @@
 import { supabase } from '../../lib/supabase';
 import { Note } from '../../types';
 
-export const loadNotes = async (userId: string): Promise<Note[]> => {
-  const { data, error } = await supabase
-    .from('notes')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+export const loadNotes = async (userId: string, bookId?: string): Promise<Note[]> => {
+  let query = supabase.from('notes').select('*').eq('user_id', userId);
+  if (bookId) query = query.eq('book_id', bookId);
+
+  const { data, error } = await query.order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as Note[];
 };
