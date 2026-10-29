@@ -1,11 +1,13 @@
 import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Book, Note, Review, ScreenId, UserProfile, ReadingStatus, Question } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
+import { NotesView } from '../../notes/components/NotesView';
+import { loadNotes } from '../../notes/notes.service';
 
 interface BookDetailViewProps {
   book: Book;
   questions?: Question[];
-  notes?: Note[];
   reviews?: Review[];
   currentUser?: UserProfile;
   onAddNote?: (n: Note) => void;
@@ -27,7 +29,6 @@ interface BookDetailViewProps {
 
 export const BookDetailView: React.FC<BookDetailViewProps> = ({
   book,
-  notes = [],
   reviews = [],
   currentUser,
   onAddNote,
@@ -56,10 +57,12 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
   const [revBody, setRevBody] = useState('');
   const [revQuote, setRevQuote] = useState('');
 
-  // Filter notes for this book by matching book_id
-  const bookNotes = useMemo(() => {
-    return notes.filter((n) => n.book_id === book.id);
-  }, [notes, book.id]);
+  const { data: notes = [] } = useQuery({
+    queryKey: ['notes', currentUser?.id ?? null],
+    queryFn: () => loadNotes(currentUser!.id),
+    enabled: Boolean(currentUser?.id),
+  });
+  const bookNotes = notes.filter((note) => note.book_id === book.id);
 
   // Filter reviews for this book by matching book_id
   const bookReviews = useMemo(() => {
@@ -365,7 +368,8 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
         </section>
 
         {/* 3. NOTES */}
-        <section className="bg-theme-surface rounded-xl border border-theme p-5 sm:p-6 shadow-xs space-y-4">
+        <NotesView userId={currentUser?.id} books={[book]} onShowToast={onShowToast} initialBookId={book.id} bookFilterId={book.id} compact />
+        {false && <section className="bg-theme-surface rounded-xl border border-theme p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-theme">
             <div>
               <div className="flex items-center gap-2.5">
@@ -436,7 +440,7 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
               })}
             </div>
           )}
-        </section>
+        </section>}
 
         {/* 4. REVIEWS */}
         <section className="bg-theme-surface rounded-xl border border-theme p-5 sm:p-6 shadow-xs space-y-4">
