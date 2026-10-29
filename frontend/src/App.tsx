@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ScreenId, UserProfile, Book, DialecticComment, Question, ReadingPath, Review, Note, Bookmark, ThemeMode } from './types';
+import { ScreenId, UserProfile, Book, DialecticComment, Question, ReadingPath, Review, Bookmark, ThemeMode } from './types';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { HomeFeedView } from './components/HomeFeedView';
@@ -11,6 +11,7 @@ import { PathsView } from './features/reading-paths';
 import { ReviewsView, createReview, deleteReview, loadReviews, mapReviewMutationError, ReviewDetailView, updateReview } from './features/reviews';
 import { loadProfile, ProfileView, updateProfile, uploadAvatar } from './features/profile';
 import { SavedView } from './features/saved';
+import { NotesView } from './features/notes/components/NotesView';
 import { supabase } from './lib/supabase';
 
 // ============================================================
@@ -33,7 +34,6 @@ const INITIAL_COLLOQUIUM_COMMENTS: DialecticComment[] = [];
 const INITIAL_QUESTIONS: Question[] = [];
 const INITIAL_PATHS: ReadingPath[] = [];
 const INITIAL_REVIEWS: Review[] = [];
-const INITIAL_NOTES: Note[] = [];
 const INITIAL_BOOKMARKS: Bookmark[] = [];
 
 export const App: React.FC = () => {
@@ -62,7 +62,6 @@ export const App: React.FC = () => {
   // --- FEATURE STATE (Will be moved to components later) ---
   const [questions, setQuestions] = useState<Question[]>(INITIAL_QUESTIONS);
   const [colloquiumComments, setColloquiumComments] = useState<DialecticComment[]>(INITIAL_COLLOQUIUM_COMMENTS);
-  const [notes, setNotes] = useState<Note[]>(INITIAL_NOTES);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(INITIAL_BOOKMARKS);
   const [paths, setPaths] = useState<ReadingPath[]>(INITIAL_PATHS);
 
@@ -274,10 +273,7 @@ export const App: React.FC = () => {
     }
   };
 
-  // --- NOTES & BOOKMARKS HANDLERS (Local state for now) ---
-  const handleAddNote = (n: Note) => { setNotes(prev => [n, ...prev]); setUser(prev => ({ ...prev, notesCount: prev.notesCount + 1 })); };
-  const handleUpdateNote = (id: string, updated: Partial<Note>) => setNotes(prev => prev.map(n => n.id === id ? { ...n, ...updated } : n));
-  const handleDeleteNote = (id: string) => { setNotes(prev => prev.filter(n => n.id !== id)); setUser(prev => ({ ...prev, notesCount: Math.max(0, prev.notesCount - 1) })); };
+  // --- BOOKMARKS HANDLERS ---
   const handleAddBookmark = (b: Bookmark) => setBookmarks(prev => [b, ...prev]);
   const handleUpdateBookmark = (id: string, updated: Partial<Bookmark>) => setBookmarks(prev => prev.map(b => b.id === id ? { ...b, ...updated } : b));
   const handleDeleteBookmark = (id: string) => setBookmarks(prev => prev.filter(b => b.id !== id));
@@ -328,9 +324,8 @@ export const App: React.FC = () => {
 
         {currentScreen === 'library' && (
           <SavedView
-            bookmarks={bookmarks} notes={notes} books={books} initialTab="library"
+            bookmarks={bookmarks} books={books} initialTab="library" userId={authUserId}
             onAddBookmark={handleAddBookmark} onUpdateBookmark={handleUpdateBookmark} onDeleteBookmark={handleDeleteBookmark}
-            onAddNote={handleAddNote} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote}
             onUpdateBookStatus={(bId, status) => handleUpdateBookStatus()}
             onSelectBook={handleSelectBook}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
@@ -361,8 +356,8 @@ export const App: React.FC = () => {
         {currentScreen === 'book-detail' && books.length > 0 && (
           <BookDetailView
             book={books.find((b) => b.id === selectedBookId) || books[0]}
-            questions={questions} notes={notes} reviews={reviews} currentUser={user}
-            onAddNote={handleAddNote} onAddReview={handleAddReview} onUpdateBookStatus={handleUpdateBookStatus}
+            questions={questions} reviews={reviews} currentUser={user}
+            onAddReview={handleAddReview} onUpdateBookStatus={handleUpdateBookStatus}
             onAddReply={() => {}}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onOpenSeminar={handleOpenSeminar}
@@ -433,21 +428,13 @@ export const App: React.FC = () => {
         )}
 
         {currentScreen === 'notes' && (
-          <SavedView
-            bookmarks={bookmarks} notes={notes} books={books} initialTab="notes"
-            onAddBookmark={handleAddBookmark} onUpdateBookmark={handleUpdateBookmark} onDeleteBookmark={handleDeleteBookmark}
-            onAddNote={handleAddNote} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote}
-            onUpdateBookStatus={() => {}} onSelectBook={handleSelectBook}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-            onShowToast={showToast}
-          />
+          <NotesView userId={authUserId} books={books} onShowToast={showToast} />
         )}
 
         {currentScreen === 'bookmarks' && (
           <SavedView
-            bookmarks={bookmarks} notes={notes} books={books} initialTab="bookmarks"
+            bookmarks={bookmarks} books={books} initialTab="bookmarks" userId={authUserId}
             onAddBookmark={handleAddBookmark} onUpdateBookmark={handleUpdateBookmark} onDeleteBookmark={handleDeleteBookmark}
-            onAddNote={handleAddNote} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote}
             onUpdateBookStatus={() => {}} onSelectBook={handleSelectBook}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onShowToast={showToast}
@@ -478,7 +465,7 @@ export const App: React.FC = () => {
       <SearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
-        books={books} questions={questions} paths={paths} notes={notes}
+        books={books} questions={questions} paths={paths} authUserId={authUserId}
         onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
       />
 
