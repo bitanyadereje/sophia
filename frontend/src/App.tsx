@@ -223,8 +223,6 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleUpdateBookStatus = () => {}; // Stub for now
-
   // --- REVIEW HANDLERS (Data logic stays here, UI logic moves to component) ---
   const handleAddReview = async (data: any): Promise<any> => {
     if (!authUserId) return { ok: false, error: 'You must be signed in to publish a review.' };
@@ -326,7 +324,6 @@ export const App: React.FC = () => {
           <SavedView
             bookmarks={bookmarks} books={books} initialTab="library" userId={authUserId}
             onAddBookmark={handleAddBookmark} onUpdateBookmark={handleUpdateBookmark} onDeleteBookmark={handleDeleteBookmark}
-            onUpdateBookStatus={(bId, status) => handleUpdateBookStatus()}
             onSelectBook={handleSelectBook}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onShowToast={showToast}
@@ -357,7 +354,7 @@ export const App: React.FC = () => {
           <BookDetailView
             book={books.find((b) => b.id === selectedBookId) || books[0]}
             questions={questions} reviews={reviews} currentUser={user}
-            onAddReview={handleAddReview} onUpdateBookStatus={handleUpdateBookStatus}
+            onAddReview={handleAddReview}
             onAddReply={() => {}}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onOpenSeminar={handleOpenSeminar}
@@ -435,7 +432,7 @@ export const App: React.FC = () => {
           <SavedView
             bookmarks={bookmarks} books={books} initialTab="bookmarks" userId={authUserId}
             onAddBookmark={handleAddBookmark} onUpdateBookmark={handleUpdateBookmark} onDeleteBookmark={handleDeleteBookmark}
-            onUpdateBookStatus={() => {}} onSelectBook={handleSelectBook}
+            onSelectBook={handleSelectBook}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onShowToast={showToast}
           />
