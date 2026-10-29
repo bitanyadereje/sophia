@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Book, Note, Review, ScreenId, UserProfile, ReadingStatus, Question } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { NotesView } from '../../notes/components/NotesView';
 import { loadNotes } from '../../notes/notes.service';
+import { loadUserLibraryBook, updateBookStatus } from '../../library/library.service';
 
 interface BookDetailViewProps {
   book: Book;
@@ -12,14 +13,6 @@ interface BookDetailViewProps {
   currentUser?: UserProfile;
   onAddNote?: (n: Note) => void;
   onAddReview?: (reviewData: any) => void; 
-  onUpdateBookStatus?: (
-
-    bookId: string,
-    status: ReadingStatus,
-    userRating?: number,
-    currentPage?: number,
-    currentLocation?: string
-  ) => void;
   onAddQuestion?: (q: Question) => void;
   onAddReply?: (questionId: string, replyText: string) => void;
   onNavigate: (screen: ScreenId) => void;
@@ -33,12 +26,12 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
   currentUser,
   onAddNote,
   onAddReview,
-  onUpdateBookStatus,
   onNavigate,
   onOpenSeminar,
   onShowToast
 }) => {
   const { isAmharic } = useLanguage();
+  const queryClient = useQueryClient();
   const [isBookSaved, setIsBookSaved] = useState(false);
 
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
@@ -58,11 +51,26 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
   const [revQuote, setRevQuote] = useState('');
 
   const { data: notes = [] } = useQuery({
-    queryKey: ['notes', currentUser?.id ?? null],
-    queryFn: () => loadNotes(currentUser!.id),
+    queryKey: ['notes', currentUser?.id ?? null, book.id],
+    queryFn: () => loadNotes(currentUser!.id, book.id),
     enabled: Boolean(currentUser?.id),
   });
-  const bookNotes = notes.filter((note) => note.book_id === book.id);
+  const bookNotes = notes;
+
+  const { data: libraryBook } = useQuery({
+    queryKey: ['library', currentUser?.id, book.id],
+    queryFn: () => loadUserLibraryBook(currentUser!.id, book.id),
+    enabled: Boolean(currentUser?.id),
+  });
+  const libraryStatusMutation = useMutation({
+    mutationFn: (values: { status: ReadingStatus; pagesRead?: number }) =>
+      updateBookStatus(currentUser!.id, book.id, values.status, values.pagesRead),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['library', currentUser?.id] });
+      onShowToast('Library status updated');
+    },
+    onError: () => onShowToast('Could not update your library'),
+  });
 
   // Filter reviews for this book by matching book_id
   const bookReviews = useMemo(() => {
@@ -72,20 +80,16 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
   const handleSaveReadingLog = (e: React.FormEvent) => {
     e.preventDefault();
     const pageNum = Number(logPage) || 0;
-    if (onUpdateBookStatus) {
-      onUpdateBookStatus(book.id, 'reading', undefined, pageNum, logLocation);
-    }
+    if (currentUser?.id) libraryStatusMutation.mutate({ status: 'reading', pagesRead: pageNum });
+    else onShowToast('Sign in to update your library');
     setIsLogModalOpen(false);
-    onShowToast(`Reading progress updated: page ${pageNum}${logLocation ? ` in ${logLocation}` : ''}`);
   };
 
   const handleSaveWantToRead = (e: React.FormEvent) => {
     e.preventDefault();
-    if (onUpdateBookStatus) {
-      onUpdateBookStatus(book.id, 'to_be_read');
-    }
+    if (!currentUser?.id) return onShowToast('Sign in to update your library');
+    libraryStatusMutation.mutate({ status: 'to_be_read' });
     setIsWantModalOpen(false);
-    onShowToast(`Saved "${book.title}" to your Want to Read shelf`);
   };
 
   const handleCreateNote = (e: React.FormEvent) => {
@@ -137,17 +141,13 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
   };
 
   const handleStartReading = () => {
-    if (onUpdateBookStatus) {
-      onUpdateBookStatus(book.id, 'reading', undefined, 1);
-    }
-    onShowToast(`Started reading "${book.title}"`);
+    if (!currentUser?.id) return onShowToast('Sign in to update your library');
+    libraryStatusMutation.mutate({ status: 'reading' });
   };
 
   const handleMarkFinished = () => {
-    if (onUpdateBookStatus) {
-      onUpdateBookStatus(book.id, 'finished');
-    }
-    onShowToast(`Congratulations! Marked "${book.title}" as completed.`);
+    if (!currentUser?.id) return onShowToast('Sign in to update your library');
+    libraryStatusMutation.mutate({ status: 'finished' });
   };
 
   return (
@@ -275,9 +275,15 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
 
               {/* Action buttons */}
               <div className="mt-5 pt-4 border-t border-theme flex flex-wrap items-center gap-3">
+                {libraryBook && (
+                  <span className="rounded-full bg-theme-subtle px-3 py-1 text-xs font-medium text-theme-main">
+                    {libraryBook.status === 'to_be_read' ? 'Want to Read' : libraryBook.status === 'finished' ? 'Finished' : libraryBook.status === 'dnf' ? 'Did not finish' : 'Reading'}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsWantModalOpen(true)}
+                  disabled={libraryStatusMutation.isPending}
                   className="h-10 px-4 py-2 rounded-lg bg-theme-surface border-2 border-theme-accent text-theme-accent hover:bg-theme-accent hover:text-white text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer shadow-xs"
                 >
                   <span className="material-symbols-outlined text-[18px]">playlist_add</span>
@@ -287,6 +293,7 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
                 <button
                   type="button"
                   onClick={handleStartReading}
+                  disabled={libraryStatusMutation.isPending}
                   className="h-10 px-3.5 py-2 rounded-lg bg-theme-surface border border-theme text-theme-main hover:bg-theme-subtle text-xs sm:text-sm font-serif font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
                   <span className="material-symbols-outlined text-[17px] text-theme-accent">play_arrow</span>
@@ -305,6 +312,7 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
                 <button
                   type="button"
                   onClick={handleMarkFinished}
+                  disabled={libraryStatusMutation.isPending}
                   className="h-10 px-3.5 py-2 rounded-lg bg-theme-surface border border-theme text-theme-main hover:bg-theme-subtle text-xs sm:text-sm font-serif font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
                   <span className="material-symbols-outlined text-[17px] text-theme-accent">check_circle</span>
