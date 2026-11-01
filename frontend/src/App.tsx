@@ -41,6 +41,7 @@ export const App: React.FC = () => {
   const [user, setUser] = useState<UserProfile>(INITIAL_USER);
   const [theme, setTheme] = useState<ThemeMode>(INITIAL_USER.themePreference || 'dark');
   const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const canCreateReadingPaths = Boolean(authUserId);
   
   // --- GLOBAL UI STATE ---
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -380,6 +381,10 @@ export const App: React.FC = () => {
             onSelectPath={setSelectedPathId}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onShowToast={showToast}
+            userId={authUserId || ''}
+            canCreatePaths={canCreateReadingPaths || false}
+            onSelectBook={handleSelectBook}
+            books={books}
           />
         )}
 
@@ -390,6 +395,10 @@ export const App: React.FC = () => {
             onSelectPath={setSelectedPathId}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onShowToast={showToast}
+            userId={authUserId || ''}
+            canCreatePaths={canCreateReadingPaths || false}
+            onSelectBook={handleSelectBook}
+            books={books}
           />
         )}
 
