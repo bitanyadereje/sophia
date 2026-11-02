@@ -296,6 +296,7 @@ export interface Bookmark {
 
 export interface UserProfile {
   id: string;
+  role?: string;
   name: string;
   title: string;
   location: string;

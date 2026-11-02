@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ScreenId } from '../../../types';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bookmark, BookmarkCheck, Plus, X } from 'lucide-react';
+import { Book, Difficulty, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { loadReadingPathBooks, loadReadingPaths } from '../path.service';
+import { addBooksToPath, approvePath, createReadingPath, loadPendingPaths, loadReadingPathBooks, loadReadingPaths, loadSavedPaths, toggleSavePath } from '../path.service';
 
 interface PathsViewProps {
   isDetailView: boolean;
@@ -10,6 +11,11 @@ interface PathsViewProps {
   onSelectPath: (pathId: string) => void;
   onNavigate: (screen: ScreenId) => void;
   onShowToast: (msg: string) => void;
+  userId: string | null;
+  canCreatePaths: boolean;
+  onSelectBook: (bookId: string) => void;
+  books: Book[];
+  isAdmin: boolean;
 }
 
 export const PathsView: React.FC<PathsViewProps> = ({
@@ -17,12 +23,71 @@ export const PathsView: React.FC<PathsViewProps> = ({
   selectedPathId,
   onSelectPath,
   onNavigate,
-  onShowToast
+  onShowToast,
+  userId,
+  canCreatePaths,
+  onSelectBook,
+  books,
+  isAdmin,
 }) => {
   const { isAmharic } = useLanguage();
+  const queryClient = useQueryClient();
+  const [viewMode, setViewMode] = useState<'public' | 'pending'>('public');
   const { data: paths = [], isPending: isPathsPending } = useQuery({
-    queryKey: ['reading-paths'],
+    queryKey: ['paths'],
     queryFn: loadReadingPaths,
+  });
+  const { data: savedPaths = [] } = useQuery({
+    queryKey: ['savedPaths', userId],
+    queryFn: () => loadSavedPaths(userId!),
+    enabled: Boolean(userId),
+  });
+  const { data: pendingPaths = [], isPending: isPendingPathsLoading } = useQuery({
+    queryKey: ['pending-paths'],
+    queryFn: loadPendingPaths,
+    enabled: isAdmin && viewMode === 'pending' && !isDetailView,
+  });
+  const approvePathMutation = useMutation({
+    mutationFn: (pathId: string) => approvePath(pathId, userId!),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['pending-paths'] }),
+        queryClient.invalidateQueries({ queryKey: ['paths'] }),
+      ]);
+      onShowToast('Path approved!');
+    },
+    onError: () => onShowToast('Could not approve path.'),
+  });
+  const savedPathIds = new Set(savedPaths.map(({ path_id }) => path_id));
+  const savePathMutation = useMutation({
+    mutationFn: ({ pathId, isSaved }: { pathId: string; isSaved: boolean }) => toggleSavePath(userId!, pathId, isSaved),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['savedPaths'] }),
+        queryClient.invalidateQueries({ queryKey: ['paths'] }),
+      ]);
+    },
+    onError: () => onShowToast('Could not update saved paths.'),
+  });
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [selectedBooks, setSelectedBooks] = useState<string[]>([]);
+  const [bookSearch, setBookSearch] = useState('');
+  const [newPath, setNewPath] = useState({ title: '', description: '', topic: '', difficulty: 'beginner' as Difficulty });
+  const createPathMutation = useMutation({
+    mutationFn: async () => {
+      const path = await createReadingPath(userId!, newPath.title.trim(), newPath.description.trim(), newPath.topic.trim(), newPath.difficulty);
+      await addBooksToPath(path.id, selectedBooks);
+      return path;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['paths'] });
+      setIsCreateModalOpen(false);
+      setNewPath({ title: '', description: '', topic: '', difficulty: 'beginner' });
+      setSelectedBooks([]);
+      setBookSearch('');
+      onShowToast('Reading path submitted for review.');
+    },
+    onError: () => onShowToast('Could not create reading path.'),
   });
   const activePath = paths.find((path) => path.id === selectedPathId) ?? paths[0] ?? null;
   const { data: pathBooks = [], isPending: arePathBooksPending } = useQuery({
@@ -54,6 +119,10 @@ export const PathsView: React.FC<PathsViewProps> = ({
   });
 
   const enrolledPath = paths[0];
+  const matchingBooks = books.filter((book) =>
+    book.title.toLowerCase().includes(bookSearch.trim().toLowerCase())
+      && !selectedBooks.includes(book.id),
+  ).slice(0, 8);
 
   // =========================================================================
   // DETAIL VIEW: REFINED SYLLABUS & STATIONS
@@ -145,6 +214,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
                     {book?.author_name && <p className="text-xs text-theme-muted">{book.author_name}</p>}
                     {pathBook.note && <p className="mt-1 text-xs text-theme-body font-serif leading-relaxed">{pathBook.note}</p>}
                   </div>
+                  {book?.id && <button type="button" onClick={() => onSelectBook(book.id)} className="ml-auto rounded-lg border border-theme px-3 py-2 text-xs font-semibold text-theme-main hover:bg-theme-subtle">Open book</button>}
                 </article>
               );
             })}
@@ -163,21 +233,27 @@ export const PathsView: React.FC<PathsViewProps> = ({
 
         {/* Section Title Header */}
         <header className="flex flex-col gap-1.5 border-b border-theme pb-4">
-          <div className="flex items-baseline justify-between">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
             <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main">
               {isAmharic ? 'የንባብ መንገዶች' : 'Reading Paths'}
             </h1>
             <span className="text-xs sm:text-sm font-serif text-theme-muted bg-theme-surface px-2.5 lg:px-3 py-0.5 rounded-full border border-theme">
               {paths.length} {isAmharic ? 'የንባብ እቅዶች' : 'Reading Plans'}
             </span>
+            {canCreatePaths && userId && <button type="button" onClick={() => setIsCreateModalOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-theme-main px-3 py-2 text-sm font-semibold text-white hover:opacity-90"><Plus size={16} />Create Path</button>}
           </div>
           <p className="text-xs sm:text-sm lg:text-base text-theme-muted font-serif leading-relaxed">
             Curated historical itineraries through early monasticism, patristics, and classical philosophy.
           </p>
         </header>
 
+        {isAdmin && <div className="flex w-fit rounded-lg border border-theme bg-theme-surface p-1" role="group" aria-label="Reading path view">
+          <button type="button" onClick={() => setViewMode('public')} aria-pressed={viewMode === 'public'} className={`rounded-md px-3 py-2 text-sm ${viewMode === 'public' ? 'bg-theme-main text-white' : 'text-theme-muted hover:text-theme-main'}`}>Public Paths</button>
+          <button type="button" onClick={() => setViewMode('pending')} aria-pressed={viewMode === 'pending'} className={`rounded-md px-3 py-2 text-sm ${viewMode === 'pending' ? 'bg-theme-main text-white' : 'text-theme-muted hover:text-theme-main'}`}>Pending Approvals</button>
+        </div>}
+
         {/* SECTION 1: CURRENTLY ENROLLED PATH (Featured Panel) */}
-        {enrolledPath && (
+        {viewMode === 'public' && enrolledPath && (
           <section id="enrolled-paths-section" className="flex flex-col gap-2.5 lg:gap-3">
             <div className="flex items-center gap-3">
               <h2 className="text-[11px] lg:text-xs font-sans font-semibold uppercase tracking-[0.25em] text-theme-muted whitespace-nowrap">
@@ -267,7 +343,14 @@ export const PathsView: React.FC<PathsViewProps> = ({
 
           {/* Curricula Cards */}
           <div className="space-y-3 lg:space-y-4">
-            {isPathsPending ? (
+            {viewMode === 'pending' && isAdmin ? (
+              isPendingPathsLoading ? <p className="py-8 text-center text-sm text-theme-muted">Loading pending paths...</p>
+                : pendingPaths.length === 0 ? <p className="py-8 text-center text-sm text-theme-muted">No paths awaiting approval.</p>
+                  : pendingPaths.map((path) => <article key={path.id} className="flex flex-col gap-3 rounded-xl border border-theme bg-theme-surface p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                    <div className="min-w-0"><span className="text-xs font-semibold uppercase tracking-wider text-theme-accent">{path.topic}</span><h3 className="mt-1 font-serif text-lg font-semibold text-theme-main">{path.title}</h3><p className="mt-1 text-sm text-theme-body">{path.description}</p><p className="mt-2 text-xs text-theme-muted">Difficulty: {path.difficulty || 'Not specified'}</p></div>
+                    <button type="button" disabled={approvePathMutation.isPending || !userId} onClick={() => approvePathMutation.mutate(path.id)} className="shrink-0 rounded-lg bg-theme-main px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{approvePathMutation.isPending ? 'Approving…' : 'Approve'}</button>
+                  </article>)
+            ) : isPathsPending ? (
               <p className="py-8 text-center text-sm text-theme-muted">Loading reading paths...</p>
             ) : filteredPaths.map((path) => (
               <article
@@ -300,7 +383,8 @@ export const PathsView: React.FC<PathsViewProps> = ({
                     {isAmharic ? '???' : 'Difficulty'}: {path.difficulty || (isAmharic ? '??????' : 'Not specified')}
                   </div>                </div>
 
-                <div className="flex-shrink-0 self-start sm:self-center">
+                <div className="flex flex-shrink-0 items-center gap-2 self-start sm:self-center">
+                  {userId && <button type="button" disabled={savePathMutation.isPending} onClick={() => savePathMutation.mutate({ pathId: path.id, isSaved: savedPathIds.has(path.id) })} className="rounded-lg border border-theme bg-theme-surface p-2 text-theme-accent hover:bg-theme-subtle disabled:opacity-50" aria-label={savedPathIds.has(path.id) ? 'Unsave reading path' : 'Save reading path'} title={savedPathIds.has(path.id) ? 'Unsave path' : 'Save path'}>{savedPathIds.has(path.id) ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}</button>}
                   <button
                     type="button"
                     onClick={() => {
@@ -317,7 +401,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
             ))}
           </div>
 
-          {!isPathsPending && filteredPaths.length === 0 && (
+          {viewMode === 'public' && !isPathsPending && filteredPaths.length === 0 && (
             <div className="py-12 text-center text-xs font-serif italic text-theme-muted bg-theme-surface border border-theme rounded-xl">
               {isAmharic ? 'ለዚህ ማጣሪያ ምንም የንባብ እቅድ አልተገኘም።' : 'No reading plans found for this filter.'}
             </div>
@@ -334,6 +418,33 @@ export const PathsView: React.FC<PathsViewProps> = ({
         </section>
 
       </div>
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="create-path-title">
+          <form onSubmit={(event) => { event.preventDefault(); createPathMutation.mutate(); }} className="w-full max-w-lg rounded-2xl border border-theme bg-theme-surface p-6 shadow-xl">
+            <div className="mb-5 flex items-center justify-between"><h2 id="create-path-title" className="font-serif text-xl font-bold text-theme-main">Create a Reading Path</h2><button type="button" onClick={() => setIsCreateModalOpen(false)} aria-label="Close"><X size={20} /></button></div>
+            <div className="space-y-4">
+              <label className="block text-sm text-theme-body">Title<input required maxLength={120} value={newPath.title} onChange={(e) => setNewPath({ ...newPath, title: e.target.value })} className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2" /></label>
+              <label className="block text-sm text-theme-body">Description<textarea required rows={3} value={newPath.description} onChange={(e) => setNewPath({ ...newPath, description: e.target.value })} className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2" /></label>
+              <label className="block text-sm text-theme-body">Topic<input required maxLength={80} value={newPath.topic} onChange={(e) => setNewPath({ ...newPath, topic: e.target.value })} className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2" /></label>
+              <label className="block text-sm text-theme-body">Difficulty<select value={newPath.difficulty} onChange={(e) => setNewPath({ ...newPath, difficulty: e.target.value as Difficulty })} className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2"><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label>
+              <div className="block text-sm text-theme-body">
+                <label htmlFor="path-book-search">Add books</label>
+                <input id="path-book-search" type="search" value={bookSearch} onChange={(event) => setBookSearch(event.target.value)} placeholder="Search books by title" className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2" />
+                {bookSearch.trim() && <ul className="mt-2 max-h-36 overflow-y-auto rounded-lg border border-theme">
+                  {matchingBooks.length ? matchingBooks.map((book) => <li key={book.id}><button type="button" onClick={() => setSelectedBooks((current) => [...current, book.id])} className="w-full px-3 py-2 text-left hover:bg-theme-subtle">{book.title}{book.author_name ? ` — ${book.author_name}` : ''}</button></li>) : <li className="px-3 py-2 text-theme-muted">No matching books</li>}
+                </ul>}
+                {selectedBooks.length > 0 && <ol className="mt-3 space-y-2">
+                  {selectedBooks.map((bookId, index) => {
+                    const book = books.find(({ id }) => id === bookId);
+                    return <li key={bookId} className="flex items-center justify-between rounded-lg border border-theme px-3 py-2"><span>{index + 1}. {book?.title ?? 'Book'}</span><button type="button" onClick={() => setSelectedBooks((current) => current.filter((id) => id !== bookId))} className="text-xs text-theme-muted hover:text-theme-main">Remove</button></li>;
+                  })}
+                </ol>}
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setIsCreateModalOpen(false)} className="rounded-lg border border-theme px-4 py-2 text-sm">Cancel</button><button type="submit" disabled={createPathMutation.isPending} className="rounded-lg bg-theme-main px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{createPathMutation.isPending ? 'Submitting…' : 'Submit for review'}</button></div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };

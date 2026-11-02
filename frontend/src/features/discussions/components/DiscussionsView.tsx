@@ -12,6 +12,9 @@ interface DiscussionsViewProps {
   onShowToast: (msg: string) => void;
 }
 
+const countAllReplies = (replies: QuestionReply[] = []): number =>
+  replies.reduce((count, reply) => count + 1 + countAllReplies(reply.replies ?? []), 0);
+
 // Fallback avatar helper that handles image loading errors gracefully with a monogram
 const AvatarWithFallback: React.FC<{
   src?: string;
@@ -658,26 +661,20 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       return true;
     });
 
+    const createdAtTime = (question: Question) => {
+      const timestamp = question.createdAt ? Date.parse(question.createdAt) : 0;
+      return Number.isFinite(timestamp) ? timestamp : 0;
+    };
+
     return [...filtered].sort((a, b) => {
+      const recentFirst = createdAtTime(b) - createdAtTime(a);
       if (sortBy === 'discussed') {
-        return b.repliesCount - a.repliesCount;
+        const replyDifference = countAllReplies(b.replies) - countAllReplies(a.replies);
+        return replyDifference || recentFirst;
       }
-      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return dateB - dateA;
+      return recentFirst;
     });
   }, [questions, selectedTopic, searchQuery, sortBy]);
-
-  const countAllReplies = (reps?: QuestionReply[]): number => {
-    if (!reps) return 0;
-    let count = reps.length;
-    for (const r of reps) {
-      if (r.replies && r.replies.length > 0) {
-        count += countAllReplies(r.replies);
-      }
-    }
-    return count;
-  };
 
   return (
     <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
