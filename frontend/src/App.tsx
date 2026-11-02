@@ -41,6 +41,7 @@ export const App: React.FC = () => {
   const [user, setUser] = useState<UserProfile>(INITIAL_USER);
   const [theme, setTheme] = useState<ThemeMode>(INITIAL_USER.themePreference || 'dark');
   const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const isAdmin = user.role === 'admin';
   const canCreateReadingPaths = Boolean(authUserId);
   
   // --- GLOBAL UI STATE ---
@@ -86,13 +87,17 @@ export const App: React.FC = () => {
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) console.error('Failed to load auth session:', error);
       setAuthUserId(session?.user?.id ?? null);
-      if (session?.user) void loadCurrentProfile(session.user.id);
+      if (session?.user) {
+        setUser(INITIAL_USER);
+        void loadCurrentProfile(session.user.id);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const userId = session?.user?.id ?? null;
       setAuthUserId(userId);
       if (userId) {
+        setUser(INITIAL_USER);
         void loadCurrentProfile(userId);
       } else if (isMounted) {
         setUser(INITIAL_USER);
@@ -385,6 +390,7 @@ export const App: React.FC = () => {
             canCreatePaths={canCreateReadingPaths || false}
             onSelectBook={handleSelectBook}
             books={books}
+            isAdmin={isAdmin}
           />
         )}
 
@@ -399,6 +405,7 @@ export const App: React.FC = () => {
             canCreatePaths={canCreateReadingPaths || false}
             onSelectBook={handleSelectBook}
             books={books}
+            isAdmin={isAdmin}
           />
         )}
 

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bookmark, BookmarkCheck, Plus, X } from 'lucide-react';
 import { Book, Difficulty, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { addBooksToPath, createReadingPath, loadReadingPathBooks, loadReadingPaths, loadSavedPaths, toggleSavePath } from '../path.service';
+import { addBooksToPath, approvePath, createReadingPath, loadPendingPaths, loadReadingPathBooks, loadReadingPaths, loadSavedPaths, toggleSavePath } from '../path.service';
 
 interface PathsViewProps {
   isDetailView: boolean;
@@ -15,6 +15,7 @@ interface PathsViewProps {
   canCreatePaths: boolean;
   onSelectBook: (bookId: string) => void;
   books: Book[];
+  isAdmin: boolean;
 }
 
 export const PathsView: React.FC<PathsViewProps> = ({
@@ -27,9 +28,11 @@ export const PathsView: React.FC<PathsViewProps> = ({
   canCreatePaths,
   onSelectBook,
   books,
+  isAdmin,
 }) => {
   const { isAmharic } = useLanguage();
   const queryClient = useQueryClient();
+  const [viewMode, setViewMode] = useState<'public' | 'pending'>('public');
   const { data: paths = [], isPending: isPathsPending } = useQuery({
     queryKey: ['paths'],
     queryFn: loadReadingPaths,
@@ -38,6 +41,22 @@ export const PathsView: React.FC<PathsViewProps> = ({
     queryKey: ['savedPaths', userId],
     queryFn: () => loadSavedPaths(userId!),
     enabled: Boolean(userId),
+  });
+  const { data: pendingPaths = [], isPending: isPendingPathsLoading } = useQuery({
+    queryKey: ['pending-paths'],
+    queryFn: loadPendingPaths,
+    enabled: isAdmin && viewMode === 'pending' && !isDetailView,
+  });
+  const approvePathMutation = useMutation({
+    mutationFn: (pathId: string) => approvePath(pathId, userId!),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['pending-paths'] }),
+        queryClient.invalidateQueries({ queryKey: ['paths'] }),
+      ]);
+      onShowToast('Path approved!');
+    },
+    onError: () => onShowToast('Could not approve path.'),
   });
   const savedPathIds = new Set(savedPaths.map(({ path_id }) => path_id));
   const savePathMutation = useMutation({
@@ -228,8 +247,13 @@ export const PathsView: React.FC<PathsViewProps> = ({
           </p>
         </header>
 
+        {isAdmin && <div className="flex w-fit rounded-lg border border-theme bg-theme-surface p-1" role="group" aria-label="Reading path view">
+          <button type="button" onClick={() => setViewMode('public')} aria-pressed={viewMode === 'public'} className={`rounded-md px-3 py-2 text-sm ${viewMode === 'public' ? 'bg-theme-main text-white' : 'text-theme-muted hover:text-theme-main'}`}>Public Paths</button>
+          <button type="button" onClick={() => setViewMode('pending')} aria-pressed={viewMode === 'pending'} className={`rounded-md px-3 py-2 text-sm ${viewMode === 'pending' ? 'bg-theme-main text-white' : 'text-theme-muted hover:text-theme-main'}`}>Pending Approvals</button>
+        </div>}
+
         {/* SECTION 1: CURRENTLY ENROLLED PATH (Featured Panel) */}
-        {enrolledPath && (
+        {viewMode === 'public' && enrolledPath && (
           <section id="enrolled-paths-section" className="flex flex-col gap-2.5 lg:gap-3">
             <div className="flex items-center gap-3">
               <h2 className="text-[11px] lg:text-xs font-sans font-semibold uppercase tracking-[0.25em] text-theme-muted whitespace-nowrap">
@@ -319,7 +343,14 @@ export const PathsView: React.FC<PathsViewProps> = ({
 
           {/* Curricula Cards */}
           <div className="space-y-3 lg:space-y-4">
-            {isPathsPending ? (
+            {viewMode === 'pending' && isAdmin ? (
+              isPendingPathsLoading ? <p className="py-8 text-center text-sm text-theme-muted">Loading pending paths...</p>
+                : pendingPaths.length === 0 ? <p className="py-8 text-center text-sm text-theme-muted">No paths awaiting approval.</p>
+                  : pendingPaths.map((path) => <article key={path.id} className="flex flex-col gap-3 rounded-xl border border-theme bg-theme-surface p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                    <div className="min-w-0"><span className="text-xs font-semibold uppercase tracking-wider text-theme-accent">{path.topic}</span><h3 className="mt-1 font-serif text-lg font-semibold text-theme-main">{path.title}</h3><p className="mt-1 text-sm text-theme-body">{path.description}</p><p className="mt-2 text-xs text-theme-muted">Difficulty: {path.difficulty || 'Not specified'}</p></div>
+                    <button type="button" disabled={approvePathMutation.isPending || !userId} onClick={() => approvePathMutation.mutate(path.id)} className="shrink-0 rounded-lg bg-theme-main px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{approvePathMutation.isPending ? 'Approving…' : 'Approve'}</button>
+                  </article>)
+            ) : isPathsPending ? (
               <p className="py-8 text-center text-sm text-theme-muted">Loading reading paths...</p>
             ) : filteredPaths.map((path) => (
               <article
@@ -370,7 +401,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
             ))}
           </div>
 
-          {!isPathsPending && filteredPaths.length === 0 && (
+          {viewMode === 'public' && !isPathsPending && filteredPaths.length === 0 && (
             <div className="py-12 text-center text-xs font-serif italic text-theme-muted bg-theme-surface border border-theme rounded-xl">
               {isAmharic ? 'ለዚህ ማጣሪያ ምንም የንባብ እቅድ አልተገኘም።' : 'No reading plans found for this filter.'}
             </div>
