@@ -1,10 +1,10 @@
 import { supabase } from '../../lib/supabase';
 import { UserProfile } from '../../types';
 
-export const loadProfile = async (userId: string): Promise<Pick<UserProfile, 'id' | 'name' | 'avatar'>> => {
-  const { data, error } = await supabase.from('profiles').select('id, name, username, avatar_url').eq('id', userId).maybeSingle();
+export const loadProfile = async (userId: string): Promise<Pick<UserProfile, 'id' | 'role' | 'name' | 'avatar'>> => {
+  const { data, error } = await supabase.from('profiles').select('id, name, username, avatar_url, role').eq('id', userId).maybeSingle();
   if (error) throw error;
-  if (data) return { id: data.id, name: data.name || data.username || 'Reader', avatar: data.avatar_url || '' };
+  if (data) return { id: data.id, role: data.role || undefined, name: data.name || data.username || 'Reader', avatar: data.avatar_url || '' };
   const { data: authData } = await supabase.auth.getUser();
   return { id: userId, name: authData.user?.user_metadata?.name || authData.user?.email || 'Reader', avatar: '' };
 };
