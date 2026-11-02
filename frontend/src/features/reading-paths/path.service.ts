@@ -17,6 +17,25 @@ export const loadReadingPaths = async (): Promise<ReadingPath[]> => {
   return (data ?? []) as ReadingPath[];
 };
 
+export const loadPendingPaths = async (): Promise<ReadingPath[]> => {
+  const { data, error } = await supabase
+    .from('reading_paths')
+    .select('*')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as ReadingPath[];
+};
+
+export const approvePath = async (pathId: string, adminId: string): Promise<void> => {
+  const { error } = await supabase
+    .from('reading_paths')
+    .update({ status: 'approved', reviewed_by: adminId, reviewed_at: new Date().toISOString() })
+    .eq('id', pathId)
+    .eq('status', 'pending');
+  if (error) throw error;
+};
+
 export const loadReadingPathBooks = async (pathId: string): Promise<ReadingPathBookWithDetails[]> => {
   const { data, error } = await supabase
     .from('reading_path_books')
