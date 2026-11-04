@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Review, UserProfile, Book, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { getReviewerProfile } from '../review.service';
-import { getReviewLikeData, toggleReviewLike } from '../services/reviewInteraction.service';
+import { getReviewLikeData, loadSavedReviews, toggleSaveReview, toggleReviewLike } from '../services/reviewInteraction.service';
 import {
   addNestedComment,
   addReviewComment,
@@ -45,6 +45,17 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState('');
+  const { data: savedReviews = [] } = useQuery({
+    queryKey: ['saved-reviews'],
+    queryFn: () => loadSavedReviews(currentUser.id),
+    enabled: Boolean(currentUser?.id),
+  });
+  const isSaved = savedReviews.some((saved) => saved.review_id === review.id);
+  const saveMutation = useMutation({
+    mutationFn: (wasSaved: boolean) => toggleSaveReview(currentUser.id, review.id, wasSaved),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['saved-reviews'] }),
+    onError: (error: any) => onShowToast(error?.message || 'Could not update bookmark.'),
+  });
   const { data, isPending } = useQuery({
     queryKey: detailKey,
     queryFn: async () => {
@@ -259,13 +270,13 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
             </button>
 
             <button
-              onClick={() => {}}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-theme text-theme-muted hover:text-theme-main hover:bg-theme-subtle text-xs font-sans transition-colors cursor-pointer"
+              onClick={() => saveMutation.mutate(isSaved)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-theme hover:bg-theme-subtle text-xs font-sans transition-colors cursor-pointer ${isSaved ? "text-theme-gold" : "text-theme-muted hover:text-theme-main"}`}
               id="detail-save-btn"
               title={isAmharic ? 'አስቀምጥ' : 'Save review'}
             >
-              <span className="material-symbols-outlined text-[16px]">bookmark</span>
-              <span>{isAmharic ? 'አስቀምጥ' : 'Save'}</span>
+              <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: isSaved ? "'FILL' 1" : "'FILL' 0" }}>bookmark</span>
+              <span>{isSaved ? 'Saved' : (isAmharic ? 'አስቀምጥ' : 'Save')}</span>
             </button>
 
             <button

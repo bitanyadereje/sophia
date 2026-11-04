@@ -5,7 +5,7 @@ import { Book, Review, ReviewLike, ScreenId, UserProfile } from '../../../types'
 import { useLanguage } from '../../../context/LanguageContext';
 import { loadReviewerProfilesForReviews } from '../reviewerProfiles';
 import { addReviewComment, loadReviewCommentsForReviews } from '../services/reviewComment.service';
-import { loadReviewLikesForReviews, toggleReviewLike } from '../services/reviewInteraction.service';
+import { loadReviewLikesForReviews, loadSavedReviews, toggleSaveReview, toggleReviewLike } from '../services/reviewInteraction.service';
 import { loadReviews } from '../review.service';
 
 interface ReviewerProfile {
@@ -147,11 +147,22 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const [isWriteReviewOpen, setIsWriteReviewOpen] = useState(false);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
 
-  const [savedReviews, setSavedReviews] = useState<Record<string, boolean>>({});
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const profiles = reviewerProfiles;
+
+  const { data: savedReviewRows = [] } = useQuery({
+    queryKey: ['saved-reviews'],
+    queryFn: () => loadSavedReviews(authUserId!),
+    enabled: Boolean(authUserId),
+  });
+  const savedReviewIds = new Set(savedReviewRows.map((saved) => saved.review_id));
+  const saveReviewMutation = useMutation({
+    mutationFn: ({ reviewId, isSaved }: { reviewId: string; isSaved: boolean }) => toggleSaveReview(authUserId!, reviewId, isSaved),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['saved-reviews'] }),
+    onError: (error: any) => onShowToast(error?.message || 'Could not update bookmark.'),
+  });
 
   const { data: feedData, isPending } = useQuery({
     queryKey: feedKey,
@@ -277,24 +288,12 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     const wasLiked = reviewLikes.some((like) => like.review_id === id && like.user_id === authUserId);
     toggleLikeMutation.mutate({ reviewId: id, userId: authUserId, wasLiked });
   };
-  const handleToggleSave = (
-    id: string,
-    e: React.MouseEvent
-  ) => {
+  const handleToggleSave = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-
-    const nextState = !(savedReviews[id] ?? false);
-
-    setSavedReviews((prev) => ({
-      ...prev,
-      [id]: nextState,
-    }));
-
-    onShowToast(
-      nextState
-        ? (isAmharic ? 'ተቀምጧል' : 'Saved review')
-        : (isAmharic ? 'ከተቀመጡ ተወግዷል' : 'Removed saved review')
-    );
+    if (!authUserId) { onShowToast('Please sign in to save reviews.'); return; }
+    const isSaved = savedReviewIds.has(id);
+    saveReviewMutation.mutate({ reviewId: id, isSaved });
+    onShowToast(isSaved ? 'Removed saved review' : 'Saved review');
   };
 
   const handleToggleCommentDrawer = (
@@ -637,7 +636,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
             const likes = reviewLikes.filter((like) => like.review_id === review.id);
             const isLiked = likes.some((like) => like.user_id === authUserId);
             const isCommentOpen = activeCommentId === review.id;
-            const isSaved = savedReviews[review.id] ?? false;
+            const isSaved = savedReviewIds.has(review.id);
 
             const formattedDate = getRelativeDate(
               review.created_at,
@@ -853,7 +852,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                       type="button"
                       onClick={(e) => handleToggleSave(review.id, e)}
                       className={`flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle ${
-                        isSaved ? 'text-theme-accent font-semibold' : ''
+                        isSaved ? 'text-theme-gold font-semibold' : ''
                       }`}
                     >
                       <span className="material-symbols-outlined text-[16px]">
