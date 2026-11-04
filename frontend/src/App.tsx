@@ -332,6 +332,8 @@ export const App: React.FC = () => {
             onAddBookmark={handleAddBookmark} onUpdateBookmark={handleUpdateBookmark} onDeleteBookmark={handleDeleteBookmark}
             onSelectBook={handleSelectBook}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigateToDiscussion={handleNavigateToDiscussion}
+            onNavigateToReview={handleNavigateToReview}
             onShowToast={showToast}
           />
         )}
@@ -454,6 +456,8 @@ export const App: React.FC = () => {
             onAddBookmark={handleAddBookmark} onUpdateBookmark={handleUpdateBookmark} onDeleteBookmark={handleDeleteBookmark}
             onSelectBook={handleSelectBook}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigateToDiscussion={handleNavigateToDiscussion}
+            onNavigateToReview={handleNavigateToReview}
             onShowToast={showToast}
           />
         )}
