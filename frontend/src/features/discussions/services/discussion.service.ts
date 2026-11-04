@@ -237,3 +237,22 @@ export const deleteDiscussionReply = async (replyId: string, userId: string): Pr
   if (error) throw error;
   if (!data) throw new Error('You do not have permission to delete this reply.');
 };
+
+export interface SavedPost {
+  user_id: string;
+  post_id: string;
+  created_at: string;
+}
+
+export const loadSavedPosts = async (userId: string): Promise<SavedPost[]> => {
+  const { data, error } = await supabase.from('saved_posts').select('*').eq('user_id', userId);
+  if (error) throw error;
+  return (data ?? []) as SavedPost[];
+};
+
+export const toggleSavePost = async (userId: string, postId: string, isSaved: boolean): Promise<void> => {
+  const result = isSaved
+    ? await supabase.from('saved_posts').delete().eq('user_id', userId).eq('post_id', postId)
+    : await supabase.from('saved_posts').insert({ user_id: userId, post_id: postId });
+  if (result.error) throw result.error;
+};
