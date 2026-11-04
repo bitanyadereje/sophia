@@ -53,3 +53,22 @@ export const toggleReviewLike = async (reviewId: string, userId: string, isLiked
     .insert({ review_id: reviewId, user_id: userId });
   if (error) throw error;
 };
+
+export interface SavedReview {
+  user_id: string;
+  review_id: string;
+  created_at: string;
+}
+
+export const loadSavedReviews = async (userId: string): Promise<SavedReview[]> => {
+  const { data, error } = await supabase.from('saved_reviews').select('*').eq('user_id', userId);
+  if (error) throw error;
+  return (data ?? []) as SavedReview[];
+};
+
+export const toggleSaveReview = async (userId: string, reviewId: string, isSaved: boolean): Promise<void> => {
+  const result = isSaved
+    ? await supabase.from('saved_reviews').delete().eq('user_id', userId).eq('review_id', reviewId)
+    : await supabase.from('saved_reviews').insert({ user_id: userId, review_id: reviewId });
+  if (result.error) throw result.error;
+};
