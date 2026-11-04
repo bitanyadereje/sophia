@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadDiscussionsWithAuthors, loadDiscussionTopics, loadAllReplies, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
+import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadDiscussionsWithAuthors, loadDiscussionTopics, loadAllReplies, loadPostLikes, loadSavedPosts, toggleSavePost, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
 
 interface DiscussionsViewProps {
   currentUser?: UserProfile;
@@ -285,8 +285,19 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
   // Interactive local states
   const [likedQuestions, setLikedQuestions] = useState<Record<string, boolean>>({});
-  const [savedQuestions, setSavedQuestions] = useState<Record<string, boolean>>({});
   const [likedReplies, setLikedReplies] = useState<Record<string, boolean>>({});
+
+  const { data: savedPosts = [] } = useQuery({
+    queryKey: ['saved-posts'],
+    queryFn: () => loadSavedPosts(currentUser!.id),
+    enabled: Boolean(currentUser?.id),
+  });
+  const savedPostIds = new Set(savedPosts.map((saved: { post_id: string }) => saved.post_id));
+  const savePostMutation = useMutation({
+    mutationFn: ({ postId, isSaved }: { postId: string; isSaved: boolean }) => toggleSavePost(currentUser!.id, postId, isSaved),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['saved-posts'] }),
+    onError: (error: any) => onShowToast(error?.message || 'Could not update bookmark.'),
+  });
 
   const { data: questions = [], isPending } = useQuery<Question[]>({
     queryKey: discussionsKey,
@@ -494,8 +505,9 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
   };
 
   const handleToggleSave = (id: string) => {
-    const isSaved = !!savedQuestions[id];
-    setSavedQuestions((prev) => ({ ...prev, [id]: !isSaved }));
+    if (!currentUser?.id) { onShowToast('Sign in to save discussions.'); return; }
+    const isSaved = savedPostIds.has(id);
+    savePostMutation.mutate({ postId: id, isSaved });
     onShowToast(isSaved ? 'Removed from bookmarks' : 'Bookmarked discussion');
   };
 
@@ -715,14 +727,14 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                   type="button"
                   onClick={() => handleToggleSave(activeQuestion.id)}
                   className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-                    savedQuestions[activeQuestion.id]
+                    savedPostIds.has(activeQuestion.id)
                       ? 'text-theme-gold'
                       : 'text-theme-muted hover:text-theme-main hover:bg-theme-subtle'
                   }`}
                 >
                   <span
                     className="material-symbols-outlined text-[19px]"
-                    style={{ fontVariationSettings: savedQuestions[activeQuestion.id] ? "'FILL' 1" : "'FILL' 0" }}
+                    style={{ fontVariationSettings: savedPostIds.has(activeQuestion.id) ? "'FILL' 1" : "'FILL' 0" }}
                   >
                     bookmark
                   </span>
@@ -1032,7 +1044,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {sortedAndFilteredQuestions.map((q) => {
                 const isLiked = !!likedQuestions[q.id];
-                const isSaved = !!savedQuestions[q.id];
+                const isSaved = savedPostIds.has(q.id);
                 const likesCount = q.likesCount;
                 const totalReplies = countAllReplies(q.replies);
 
