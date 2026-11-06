@@ -1,33 +1,32 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Book, Bookmark, Note, ReadingStatus, ScreenId } from '../../../types';
+import { Book, ReadingStatus, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { NotesView } from '../../notes/components/NotesView';
 import { loadNotes } from '../../notes/notes.service';
 import { loadUserLibrary, removeBookFromLibrary, updateBookStatus } from '../../library/library.service';
+import { useBookmarks, useSavedItems } from '../useBookmarks';
 
 interface SavedViewProps {
-  bookmarks: Bookmark[];
   userId: string | null;
   books?: Book[];
   initialTab?: 'bookmarks' | 'notes' | 'library';
-  onAddBookmark?: (bm: Bookmark) => void;
-  onUpdateBookmark?: (id: string, updated: Partial<Bookmark>) => void;
-  onDeleteBookmark?: (id: string) => void;
   onSelectBook?: (bookId: string) => void;
+  onSelectDiscussion?: (postId: string) => void;
+  onSelectReview?: (reviewId: string) => void;
+  onSelectPath?: (pathId: string) => void;
   onNavigate: (screen: ScreenId) => void;
   onShowToast: (msg: string) => void;
 }
 
 export const SavedView: React.FC<SavedViewProps> = ({
-  bookmarks: initialBookmarks,
   userId,
   books = [],
   initialTab = 'bookmarks',
-  onAddBookmark,
-  onUpdateBookmark,
-  onDeleteBookmark,
   onSelectBook,
+  onSelectDiscussion,
+  onSelectReview,
+  onSelectPath,
   onNavigate,
   onShowToast
 }) => {
@@ -37,8 +36,10 @@ export const SavedView: React.FC<SavedViewProps> = ({
   const [activeTab, setActiveTab] = useState<'bookmarks' | 'notes' | 'library'>(initialTab);
   const [libraryFilter, setLibraryFilter] = useState<'all' | 'reading' | 'want' | 'read'>('all');
 
-  const [localBookmarks, setLocalBookmarks] = useState<Bookmark[]>(initialBookmarks);
-  const bookmarks = initialBookmarks.length > 0 ? initialBookmarks : localBookmarks;
+  const { data: savedItems = [] } = useSavedItems(userId);
+  const reviewBookmarks = useBookmarks(userId, 'review', onShowToast);
+  const postBookmarks = useBookmarks(userId, 'post', onShowToast);
+  const pathBookmarks = useBookmarks(userId, 'path', onShowToast);
   const { data: notes = [] } = useQuery({
     queryKey: ['notes', 'all', userId],
     queryFn: () => loadNotes(userId!),
@@ -64,88 +65,18 @@ export const SavedView: React.FC<SavedViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState('All');
 
-  // Bookmark Modal State
-  const [isBookmarkModalOpen, setIsBookmarkModalOpen] = useState(false);
-  const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
-  const [bmAuthor, setBmAuthor] = useState('St. Augustine of Hippo');
-  const [bmSource, setBmSource] = useState('Confessions · Book X.27');
-  const [bmQuote, setBmQuote] = useState('');
-  const [bmCategory, setBmCategory] = useState('Patristics');
-
-
-
   // Library Management Block Modal State
   const [isAddBookModalOpen, setIsAddBookModalOpen] = useState(false);
   const [selectedBookForLibrary, setSelectedBookForLibrary] = useState<string>(books[0]?.id || '');
   const [targetStatusForLibrary, setTargetStatusForLibrary] = useState<ReadingStatus>('to_be_read');
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard?.writeText(text);
-    onShowToast('Passage copied to clipboard');
-  };
-
-  // Bookmark Actions
-  const handleSaveBookmark = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!bmQuote.trim()) {
-      onShowToast('Please enter a quotation');
-      return;
-    }
-
-    if (editingBookmark) {
-      const updated = {
-        author: bmAuthor,
-        source: bmSource,
-        quote: bmQuote.trim(),
-        category: bmCategory
-      };
-      if (onUpdateBookmark) {
-        onUpdateBookmark(editingBookmark.id, updated);
-      } else {
-        setLocalBookmarks((prev) =>
-          prev.map((b) => (b.id === editingBookmark.id ? { ...b, ...updated } : b))
-        );
-      }
-      onShowToast('Bookmark updated');
-    } else {
-      const newBm: Bookmark = {
-        id: `bm-${Date.now()}`,
-        author: bmAuthor,
-        source: bmSource,
-        quote: bmQuote.trim(),
-        category: bmCategory,
-        initials: bmAuthor.split(' ').map((n) => n[0]).slice(0, 2).join(''),
-        isFavorite: true
-      };
-      if (onAddBookmark) {
-        onAddBookmark(newBm);
-      } else {
-        setLocalBookmarks((prev) => [newBm, ...prev]);
-      }
-      onShowToast('Passage saved to bookmarks');
-    }
-
-    setIsBookmarkModalOpen(false);
-    setEditingBookmark(null);
-  };
-
-  const handleDeleteBm = (id: string) => {
-    if (onDeleteBookmark) {
-      onDeleteBookmark(id);
-    } else {
-      setLocalBookmarks((prev) => prev.filter((b) => b.id !== id));
-    }
-    onShowToast('Bookmark removed');
-  };
-
-  // Filtered lists
-  const filteredBookmarks = bookmarks.filter((bm) => {
-    const matchesTag = selectedTag === 'All' || bm.category === selectedTag;
-    const matchesSearch =
-      bm.quote.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      bm.source.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      bm.author.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTag && matchesSearch;
+  const filteredBookmarks = savedItems.filter(({ kind, item }) => {
+    const matchesType = selectedTag === 'All' || selectedTag === kind;
+    const searchText = [item.title, item.content, item.body, item.author, item.author_name, item.username]
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ')
+      .toLowerCase();
+    return matchesType && searchText.includes(searchQuery.toLowerCase());
   });
 
 
@@ -186,26 +117,6 @@ export const SavedView: React.FC<SavedViewProps> = ({
               </p>
             </div>
 
-            <div className="flex items-center gap-2 self-start sm:self-auto pt-1 sm:pt-0">
-              {activeTab === 'bookmarks' ? (
-                <button
-                  type="button"
-                  id="header-new-bookmark-btn"
-                  onClick={() => {
-                    setEditingBookmark(null);
-                    setBmAuthor('St. Augustine of Hippo');
-                    setBmSource('Confessions · Book X.27');
-                    setBmQuote('');
-                    setBmCategory('Patristics');
-                    setIsBookmarkModalOpen(true);
-                  }}
-                  className="inline-flex items-center gap-2 px-4 lg:px-5 py-2.5 rounded-xl bg-theme-main text-theme-surface font-serif text-xs sm:text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer shadow-sm border border-theme"
-                >
-                  <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
-                  <span>{isAmharic ? '+ አዲስ ምልክት' : '+ New Bookmark'}</span>
-                </button>
-              ) : null}
-            </div>
           </div>
         </header>
 
@@ -235,7 +146,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
                       : 'bg-theme-subtle text-theme-muted'
                   }`}
                 >
-                  {bookmarks.length}
+                  {savedItems.length}
                 </span>
                 {activeTab === 'bookmarks' && (
                   <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-theme-accent" />
@@ -313,7 +224,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={
                 activeTab === 'bookmarks'
-                  ? (isAmharic ? 'ጥቅሶችን፣ ደራሲያንን ወይም ማጣቀሻዎችን ፈልግ...' : 'Search bookmarks by quote text, author, or citation...')
+                  ? (isAmharic ? 'የተቀመጡ ውይይቶችን፣ ዳሰሳዎችን ወይም የንባብ እቅዶችን ፈልግ...' : 'Search saved discussions, reviews, or reading paths...')
                   : activeTab === 'notes'
                   ? (isAmharic ? 'ማስታወሻዎችን ፈልግ...' : 'Search notes...')
                   : (isAmharic ? 'መጻሕፍትን ወይም ደራሲያንን ፈልግ...' : 'Search library by book title or author...')
@@ -337,18 +248,23 @@ export const SavedView: React.FC<SavedViewProps> = ({
         {activeTab === 'bookmarks' && (
           <section id="bookmarks-view-content" aria-label="Saved Bookmarks" className="space-y-6">
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
-              {['All', 'Patristics', 'Theology', 'Christology', 'Philosophy', 'Ethics'].map((tag) => (
+              {[
+                { id: 'All', label: isAmharic ? 'ሁሉም' : 'All', count: savedItems.length },
+                { id: 'post', label: isAmharic ? 'ውይይቶች' : 'Discussions', count: savedItems.filter(({ kind }) => kind === 'post').length },
+                { id: 'review', label: isAmharic ? 'ዳሰሳዎች' : 'Reviews', count: savedItems.filter(({ kind }) => kind === 'review').length },
+                { id: 'path', label: isAmharic ? 'የንባብ እቅዶች' : 'Paths', count: savedItems.filter(({ kind }) => kind === 'path').length },
+              ].map((tag) => (
                 <button
-                  key={tag}
+                  key={tag.id}
                   type="button"
-                  onClick={() => setSelectedTag(tag)}
+                  onClick={() => setSelectedTag(tag.id)}
                   className={`px-3 py-1 rounded-full whitespace-nowrap font-serif transition-colors cursor-pointer border ${
-                    selectedTag === tag
+                    selectedTag === tag.id
                       ? 'bg-theme-main text-theme-surface border-theme-main font-medium shadow-xs'
                       : 'bg-theme-surface text-theme-muted border-theme hover:text-theme-main hover:bg-theme-subtle'
                   }`}
                 >
-                  {tag}
+                  {tag.label} ({tag.count})
                 </button>
               ))}
             </div>
@@ -359,28 +275,25 @@ export const SavedView: React.FC<SavedViewProps> = ({
                   bookmark
                 </span>
                 <h3 className="font-serif text-base font-medium text-theme-main">{t('saved.noBookmarksFound', 'No bookmarks found')}</h3>
-                <p className="text-xs text-theme-muted font-serif mt-1">
-                  {t('saved.noBookmarksDesc', 'Save meaningful sentences and folios while studying manuscripts.')}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingBookmark(null);
-                    setBmQuote('');
-                    setIsBookmarkModalOpen(true);
-                  }}
-                  className="mt-4 px-4 py-2 rounded-xl bg-theme-main text-theme-surface text-xs font-serif hover:opacity-90 transition-opacity cursor-pointer shadow-xs inline-flex items-center gap-1.5"
-                >
-                  <span>{isAmharic ? '+ የመጀመሪያውን ምልክት ጨምር' : '+ Add First Bookmark'}</span>
-                </button>
+                <p className="text-xs text-theme-muted font-serif mt-1">{t('saved.noBookmarksDesc', 'Save discussions, reviews, and reading paths to find them here.')}</p>
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredBookmarks.map((bm) => (
+                {filteredBookmarks.map(({ kind, item }) => {
+                  const title = String(item.title || (kind === 'post' ? 'Discussion' : kind === 'review' ? 'Review' : 'Reading path'));
+                  const body = String(item.content || item.body || item.description || '');
+                  const author = String(item.author || item.author_name || item.username || '');
+                  const remove = kind === 'post' ? postBookmarks.toggle : kind === 'review' ? reviewBookmarks.toggle : pathBookmarks.toggle;
+                  const open = () => {
+                    if (kind === 'post') { onSelectDiscussion?.(String(item.id)); onNavigate('discussions'); }
+                    if (kind === 'review') { onSelectReview?.(String(item.id)); onNavigate('review-detail'); }
+                    if (kind === 'path') { onSelectPath?.(String(item.id)); onNavigate('path-detail'); }
+                  };
+                  return (
                   <article
-                    key={bm.id}
-                    id={`bookmark-${bm.id}`}
-                    className="bg-theme-surface rounded-xl border border-theme-subtle p-3.5 sm:p-4 lg:p-6 shadow-2xs hover:border-theme/70 transition-all group"
+                    key={`${kind}-${item.id}`}
+                    onClick={open}
+                    className="bg-theme-surface rounded-xl border border-theme-subtle p-3.5 sm:p-4 shadow-2xs hover:border-theme-accent/70 transition-all group cursor-pointer"
                   >
                     <div className="flex items-center justify-between gap-2.5">
                       <div className="flex items-center gap-2 min-w-0">
@@ -388,61 +301,35 @@ export const SavedView: React.FC<SavedViewProps> = ({
                           bookmark
                         </span>
                         <h3 className="font-serif font-bold text-sm sm:text-base lg:text-lg xl:text-xl text-theme-main leading-snug truncate">
-                          {bm.source}
+                          {title}
                         </h3>
                         <span className="text-xs text-theme-muted/50 shrink-0">•</span>
                         <span className="text-xs sm:text-[13px] lg:text-sm xl:text-[15px] text-theme-body font-serif font-medium truncate">
-                          {bm.author}
+                          {author}
                         </span>
                       </div>
 
                       <span className="text-[10px] lg:text-xs font-sans font-semibold uppercase tracking-wider px-2 lg:px-2.5 py-0.5 rounded bg-theme-subtle border border-theme-subtle text-theme-muted shrink-0">
-                        {bm.category}
+                        {kind === 'post' ? (isAmharic ? 'ውይይት' : 'Discussion') : kind === 'review' ? (isAmharic ? 'ዳሰሳ' : 'Review') : (isAmharic ? 'እቅድ' : 'Path')}
                       </span>
                     </div>
 
-                    <blockquote className="mt-2.5 lg:mt-3.5 pl-[26px] lg:pl-[30px] font-serif text-sm sm:text-[15px] lg:text-lg xl:text-xl text-theme-body italic leading-relaxed lg:leading-8">
-                      &ldquo;{bm.quote.replace(/^[“"]|[”"]$/g, '')}&rdquo;
-                    </blockquote>
+                    {body && <p className="mt-2.5 pl-[26px] font-serif text-sm text-theme-body leading-relaxed line-clamp-3">{body}</p>}
 
                     <div className="flex items-center justify-end gap-1 mt-1.5 lg:mt-2 pt-0.5">
                       <button
                         type="button"
-                        onClick={() => handleCopy(`${bm.quote}\n— ${bm.author}, ${bm.source}`)}
-                        className="p-1 lg:p-1.5 rounded text-theme-muted/40 hover:text-theme-main transition-colors cursor-pointer"
-                        title="Copy Citation"
-                        aria-label="Copy Citation"
-                      >
-                        <span className="material-symbols-outlined text-[13px] lg:text-[15px] leading-none">content_copy</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingBookmark(bm);
-                          setBmAuthor(bm.author);
-                          setBmSource(bm.source);
-                          setBmQuote(bm.quote.replace(/^[“"]|[”"]$/g, ''));
-                          setBmCategory(bm.category);
-                          setIsBookmarkModalOpen(true);
-                        }}
-                        className="p-1 lg:p-1.5 rounded text-theme-muted/40 hover:text-theme-main transition-colors cursor-pointer"
-                        title="Edit Bookmark"
-                        aria-label="Edit Bookmark"
-                      >
-                        <span className="material-symbols-outlined text-[13px] lg:text-[15px] leading-none">edit</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteBm(bm.id)}
-                        className="p-1 lg:p-1.5 rounded text-theme-muted/40 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
+                        onClick={(event) => { event.stopPropagation(); remove(String(item.id)); }}
+                        className="p-1 lg:p-1.5 rounded text-theme-gold hover:text-theme-main transition-colors cursor-pointer"
                         title="Remove Bookmark"
                         aria-label="Remove Bookmark"
                       >
-                        <span className="material-symbols-outlined text-[13px] lg:text-[15px] leading-none">delete</span>
+                        <span className="material-symbols-outlined text-[16px] leading-none" style={{ fontVariationSettings: "'FILL' 1" }}>bookmark</span>
                       </button>
                     </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
@@ -597,114 +484,6 @@ export const SavedView: React.FC<SavedViewProps> = ({
           </section>
         )}
       </div>
-
-      {/* MODAL: ADD / EDIT BOOKMARK */}
-      {isBookmarkModalOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 font-serif"
-          onClick={() => setIsBookmarkModalOpen(false)}
-        >
-          <form
-            onSubmit={handleSaveBookmark}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4"
-          >
-            <div className="flex items-start justify-between border-b border-theme pb-3">
-              <div>
-                <span className="text-[10px] font-serif uppercase tracking-[0.25em] text-theme-muted block">
-                  BOOKMARK ENTRY
-                </span>
-                <h3 className="font-serif font-bold text-base text-theme-main mt-0.5">
-                  {editingBookmark ? 'Edit Bookmark' : 'New Saved Bookmark'}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsBookmarkModalOpen(false)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                aria-label="Close dialog"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">
-                  Source / Treatise Location:
-                </label>
-                <input
-                  type="text"
-                  value={bmSource}
-                  onChange={(e) => setBmSource(e.target.value)}
-                  placeholder="e.g. Confessions · Book X.27"
-                  className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-theme-accent"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">Author:</label>
-                <input
-                  type="text"
-                  value={bmAuthor}
-                  onChange={(e) => setBmAuthor(e.target.value)}
-                  placeholder="e.g. St. Augustine of Hippo"
-                  className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-theme-accent"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">Category / Topic:</label>
-                <select
-                  value={bmCategory}
-                  onChange={(e) => setBmCategory(e.target.value)}
-                  className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main focus:outline-none focus:border-theme-accent cursor-pointer"
-                >
-                  <option value="Patristics">Patristics</option>
-                  <option value="Theology">Theology</option>
-                  <option value="Christology">Christology</option>
-                  <option value="Philosophy">Philosophy</option>
-                  <option value="Ethics">Ethics</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-serif text-theme-muted mb-1 font-medium">
-                  Quotation / Manuscript Excerpt:
-                </label>
-                <textarea
-                  rows={4}
-                  value={bmQuote}
-                  onChange={(e) => setBmQuote(e.target.value)}
-                  placeholder="Enter the passage or quote..."
-                  className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif italic text-theme-main placeholder:text-theme-muted leading-relaxed focus:outline-none focus:border-theme-accent resize-none"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-theme flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsBookmarkModalOpen(false)}
-                className="px-4 py-2 text-xs font-serif text-theme-muted hover:text-theme-main cursor-pointer"
-              >
-                {t('common.cancel', 'Cancel')}
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-theme-main text-theme-surface text-xs font-serif tracking-wide hover:opacity-90 cursor-pointer font-medium shadow-xs"
-              >
-                {editingBookmark ? (isAmharic ? 'ምልክት አስተካክል' : 'Update Bookmark') : (isAmharic ? 'ጥቅስ አስቀምጥ' : 'Save Bookmark')}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* MODAL: LIBRARY MANAGEMENT */}
       {isAddBookModalOpen && (
