@@ -17,6 +17,7 @@ import {
 } from '../services/reviewComment.service';
 import { ReviewLikeData } from '../services/reviewInteraction.service';
 import { ReviewCommentItem } from './ReviewCommentItem';
+import { useBookmarks } from '../../saved/useBookmarks';
 
 interface ReviewDetailViewProps {
   review: Review;
@@ -41,6 +42,7 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
   const queryClient = useQueryClient();
   const detailKey = ['review-detail', review.id] as const;
   const feedKey = ['reviews-feed'] as const;
+  const { isSaved, toggle: toggleSave } = useBookmarks(currentUser?.id, 'review', onShowToast);
   const [commentInput, setCommentInput] = useState('');
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
@@ -259,13 +261,13 @@ export const ReviewDetailView: React.FC<ReviewDetailViewProps> = ({
             </button>
 
             <button
-              onClick={() => {}}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-theme text-theme-muted hover:text-theme-main hover:bg-theme-subtle text-xs font-sans transition-colors cursor-pointer"
+              onClick={() => toggleSave(review.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-theme hover:bg-theme-subtle text-xs font-sans transition-colors cursor-pointer ${isSaved(review.id) ? 'text-theme-gold' : 'text-theme-muted hover:text-theme-main'}`}
               id="detail-save-btn"
               title={isAmharic ? 'አስቀምጥ' : 'Save review'}
             >
-              <span className="material-symbols-outlined text-[16px]">bookmark</span>
-              <span>{isAmharic ? 'አስቀምጥ' : 'Save'}</span>
+              <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: isSaved(review.id) ? "'FILL' 1" : "'FILL' 0" }}>bookmark</span>
+              <span>{isSaved(review.id) ? (isAmharic ? 'ተቀምጧል' : 'Saved') : (isAmharic ? 'አስቀምጥ' : 'Save')}</span>
             </button>
 
             <button

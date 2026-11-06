@@ -4,7 +4,7 @@ import { Book, Note, Review, ScreenId, UserProfile, ReadingStatus, Question } fr
 import { useLanguage } from '../../../context/LanguageContext';
 import { NotesView } from '../../notes/components/NotesView';
 import { loadNotes } from '../../notes/notes.service';
-import { loadUserLibraryBook, updateBookStatus } from '../../library/library.service';
+import { loadUserLibraryBook, removeBookFromLibrary, updateBookStatus } from '../../library/library.service';
 
 interface BookDetailViewProps {
   book: Book;
@@ -32,7 +32,6 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
 }) => {
   const { isAmharic } = useLanguage();
   const queryClient = useQueryClient();
-  const [isBookSaved, setIsBookSaved] = useState(false);
 
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [isWantModalOpen, setIsWantModalOpen] = useState(false);
@@ -68,6 +67,17 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['library', currentUser?.id] });
       onShowToast('Library status updated');
+    },
+    onError: () => onShowToast('Could not update your library'),
+  });
+  const isBookSaved = Boolean(libraryBook);
+  const saveBookMutation = useMutation({
+    mutationFn: async (save: boolean): Promise<void> => {
+      if (save) await updateBookStatus(currentUser!.id, book.id, 'to_be_read');
+      else await removeBookFromLibrary(currentUser!.id, book.id);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['library', currentUser?.id] });
     },
     onError: () => onShowToast('Could not update your library'),
   });
@@ -176,7 +186,8 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => {
-                setIsBookSaved(!isBookSaved);
+                if (!currentUser?.id) return onShowToast('Sign in to save books.');
+                saveBookMutation.mutate(!isBookSaved);
                 onShowToast(isBookSaved ? (isAmharic ? 'ከተቀመጡ ተሰርዟል' : 'Removed from saved') : (isAmharic ? 'ጥራዙ ተቀምጧል' : 'Volume saved'));
               }}
               className={`min-w-[34px] min-h-[34px] flex items-center justify-center rounded-full transition-colors cursor-pointer ${

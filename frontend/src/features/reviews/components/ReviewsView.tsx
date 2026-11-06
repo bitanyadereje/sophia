@@ -7,6 +7,7 @@ import { loadReviewerProfilesForReviews } from '../reviewerProfiles';
 import { addReviewComment, loadReviewCommentsForReviews } from '../services/reviewComment.service';
 import { loadReviewLikesForReviews, toggleReviewLike } from '../services/reviewInteraction.service';
 import { loadReviews } from '../review.service';
+import { useBookmarks } from '../../saved/useBookmarks';
 
 interface ReviewerProfile {
   name?: string | null;
@@ -147,11 +148,11 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const [isWriteReviewOpen, setIsWriteReviewOpen] = useState(false);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
 
-  const [savedReviews, setSavedReviews] = useState<Record<string, boolean>>({});
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const profiles = reviewerProfiles;
+  const { isSaved, toggle: toggleSave } = useBookmarks(authUserId, 'review', onShowToast);
 
   const { data: feedData, isPending } = useQuery({
     queryKey: feedKey,
@@ -283,18 +284,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   ) => {
     e.stopPropagation();
 
-    const nextState = !(savedReviews[id] ?? false);
-
-    setSavedReviews((prev) => ({
-      ...prev,
-      [id]: nextState,
-    }));
-
-    onShowToast(
-      nextState
-        ? (isAmharic ? 'ተቀምጧል' : 'Saved review')
-        : (isAmharic ? 'ከተቀመጡ ተወግዷል' : 'Removed saved review')
-    );
+    toggleSave(id);
   };
 
   const handleToggleCommentDrawer = (
@@ -637,7 +627,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
             const likes = reviewLikes.filter((like) => like.review_id === review.id);
             const isLiked = likes.some((like) => like.user_id === authUserId);
             const isCommentOpen = activeCommentId === review.id;
-            const isSaved = savedReviews[review.id] ?? false;
+            const saved = isSaved(review.id);
 
             const formattedDate = getRelativeDate(
               review.created_at,
@@ -853,13 +843,13 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                       type="button"
                       onClick={(e) => handleToggleSave(review.id, e)}
                       className={`flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle ${
-                        isSaved ? 'text-theme-accent font-semibold' : ''
+                        saved ? 'text-theme-accent font-semibold' : ''
                       }`}
                     >
                       <span className="material-symbols-outlined text-[16px]">
                         bookmark
                       </span>
-                      {isSaved
+                      {saved
                         ? (isAmharic ? 'ተቀምጧል' : 'Saved')
                         : (isAmharic ? 'አስቀምጥ' : 'Save')}
                     </button>

@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bookmark, BookmarkCheck, Plus, X } from 'lucide-react';
 import { Book, Difficulty, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { addBooksToPath, approvePath, createReadingPath, loadPendingPaths, loadReadingPathBooks, loadReadingPaths, loadSavedPaths, toggleSavePath } from '../path.service';
+import { addBooksToPath, approvePath, createReadingPath, loadPendingPaths, loadReadingPathBooks, loadReadingPaths } from '../path.service';
+import { useBookmarks } from '../../saved/useBookmarks';
 
 interface PathsViewProps {
   isDetailView: boolean;
@@ -37,11 +38,6 @@ export const PathsView: React.FC<PathsViewProps> = ({
     queryKey: ['paths'],
     queryFn: loadReadingPaths,
   });
-  const { data: savedPaths = [] } = useQuery({
-    queryKey: ['savedPaths', userId],
-    queryFn: () => loadSavedPaths(userId!),
-    enabled: Boolean(userId),
-  });
   const { data: pendingPaths = [], isPending: isPendingPathsLoading } = useQuery({
     queryKey: ['pending-paths'],
     queryFn: loadPendingPaths,
@@ -58,17 +54,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
     },
     onError: () => onShowToast('Could not approve path.'),
   });
-  const savedPathIds = new Set(savedPaths.map(({ path_id }) => path_id));
-  const savePathMutation = useMutation({
-    mutationFn: ({ pathId, isSaved }: { pathId: string; isSaved: boolean }) => toggleSavePath(userId!, pathId, isSaved),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['savedPaths'] }),
-        queryClient.invalidateQueries({ queryKey: ['paths'] }),
-      ]);
-    },
-    onError: () => onShowToast('Could not update saved paths.'),
-  });
+  const { isSaved, toggle: toggleSave } = useBookmarks(userId, 'path', onShowToast);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedBooks, setSelectedBooks] = useState<string[]>([]);
   const [bookSearch, setBookSearch] = useState('');
@@ -384,7 +370,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
                   </div>                </div>
 
                 <div className="flex flex-shrink-0 items-center gap-2 self-start sm:self-center">
-                  {userId && <button type="button" disabled={savePathMutation.isPending} onClick={() => savePathMutation.mutate({ pathId: path.id, isSaved: savedPathIds.has(path.id) })} className="rounded-lg border border-theme bg-theme-surface p-2 text-theme-accent hover:bg-theme-subtle disabled:opacity-50" aria-label={savedPathIds.has(path.id) ? 'Unsave reading path' : 'Save reading path'} title={savedPathIds.has(path.id) ? 'Unsave path' : 'Save path'}>{savedPathIds.has(path.id) ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}</button>}
+                  <button type="button" onClick={() => toggleSave(path.id)} className="rounded-lg border border-theme bg-theme-surface p-2 text-theme-accent hover:bg-theme-subtle" aria-label={isSaved(path.id) ? 'Unsave reading path' : 'Save reading path'} title={isSaved(path.id) ? 'Unsave path' : 'Save path'}>{isSaved(path.id) ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}</button>
                   <button
                     type="button"
                     onClick={() => {

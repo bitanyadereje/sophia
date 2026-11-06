@@ -62,7 +62,6 @@ export const ColloquiumView: React.FC<ColloquiumViewProps> = ({
 
   const [citationsCount, setCitationsCount] = useState(seminarData.citationsCount);
   const [hasCited, setHasCited] = useState(false);
-  const [isBookmarked, setIsBookmarked] = useState(false);
 
   const [localComments, setLocalComments] = useState<DialecticComment[]>(() => {
     return seminarData.initialComments && seminarData.initialComments.length > 0
@@ -203,23 +202,6 @@ export const ColloquiumView: React.FC<ColloquiumViewProps> = ({
             >
               <span className="material-symbols-outlined text-[15px]">menu_book</span>
               <span>{isAmharic ? 'የጥራዝ ዝርዝር' : 'Volume Details'}</span>
-            </button>
-            <button
-              onClick={() => {
-                setIsBookmarked(!isBookmarked);
-                onShowToast(isBookmarked ? (isAmharic ? 'ውይይቱ ከተቀመጡ ተሰርዟል' : 'Discussion removed from bookmarks') : (isAmharic ? 'ውይይቱ ተቀምጧል' : 'Discussion saved'));
-              }}
-              className={`min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full transition-colors cursor-pointer ${
-                isBookmarked ? 'text-theme-gold bg-theme-gold/10' : 'text-theme-muted hover:bg-theme-subtle'
-              }`}
-              aria-label={isAmharic ? 'ውይይት አስቀምጥ' : 'Save Discussion'}
-            >
-              <span
-                className="material-symbols-outlined text-[19px]"
-                style={{ fontVariationSettings: isBookmarked ? "'FILL' 1" : "'FILL' 0" }}
-              >
-                bookmark
-              </span>
             </button>
             <button
               onClick={() => onNavigate('library')}

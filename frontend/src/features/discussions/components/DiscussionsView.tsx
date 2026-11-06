@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadDiscussionsWithAuthors, loadDiscussionTopics, loadAllReplies, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
+import { useBookmarks } from '../../saved/useBookmarks';
 
 interface DiscussionsViewProps {
   currentUser?: UserProfile;
@@ -285,8 +286,8 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
   // Interactive local states
   const [likedQuestions, setLikedQuestions] = useState<Record<string, boolean>>({});
-  const [savedQuestions, setSavedQuestions] = useState<Record<string, boolean>>({});
   const [likedReplies, setLikedReplies] = useState<Record<string, boolean>>({});
+  const { isSaved, toggle: toggleSave } = useBookmarks(currentUser?.id, 'post', onShowToast);
 
   const { data: questions = [], isPending } = useQuery<Question[]>({
     queryKey: discussionsKey,
@@ -491,12 +492,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
         : question));
       onShowToast(isLiked ? 'Like removed' : 'Liked discussion');
     } catch (error: any) { onShowToast(error?.message || 'Could not update like.'); }
-  };
-
-  const handleToggleSave = (id: string) => {
-    const isSaved = !!savedQuestions[id];
-    setSavedQuestions((prev) => ({ ...prev, [id]: !isSaved }));
-    onShowToast(isSaved ? 'Removed from bookmarks' : 'Bookmarked discussion');
   };
 
   const updateReplyTree = (replies: QuestionReply[] = [], replyId: string, liked: boolean): QuestionReply[] => replies.map((reply) => {
@@ -713,16 +708,16 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => handleToggleSave(activeQuestion.id)}
+                  onClick={() => toggleSave(activeQuestion.id)}
                   className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-                    savedQuestions[activeQuestion.id]
+                    isSaved(activeQuestion.id)
                       ? 'text-theme-gold'
                       : 'text-theme-muted hover:text-theme-main hover:bg-theme-subtle'
                   }`}
                 >
                   <span
                     className="material-symbols-outlined text-[19px]"
-                    style={{ fontVariationSettings: savedQuestions[activeQuestion.id] ? "'FILL' 1" : "'FILL' 0" }}
+                    style={{ fontVariationSettings: isSaved(activeQuestion.id) ? "'FILL' 1" : "'FILL' 0" }}
                   >
                     bookmark
                   </span>
@@ -1032,7 +1027,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {sortedAndFilteredQuestions.map((q) => {
                 const isLiked = !!likedQuestions[q.id];
-                const isSaved = !!savedQuestions[q.id];
+                const saved = isSaved(q.id);
                 const likesCount = q.likesCount;
                 const totalReplies = countAllReplies(q.replies);
 
@@ -1124,14 +1119,14 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => handleToggleSave(q.id)}
+                          onClick={() => toggleSave(q.id)}
                           className={`cursor-pointer transition-colors p-1 rounded hover:bg-theme-subtle ${
-                            isSaved ? 'text-theme-gold' : 'hover:text-theme-main'
+                            saved ? 'text-theme-gold' : 'hover:text-theme-main'
                           }`}
                         >
                           <span
                             className="material-symbols-outlined text-[17px]"
-                            style={{ fontVariationSettings: isSaved ? "'FILL' 1" : "'FILL' 0" }}
+                            style={{ fontVariationSettings: saved ? "'FILL' 1" : "'FILL' 0" }}
                           >
                             bookmark
                           </span>
