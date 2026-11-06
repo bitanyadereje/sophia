@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ScreenId, UserProfile, Book, DialecticComment, Question, Review, Bookmark, ThemeMode } from './types';
+import { ScreenId, UserProfile, Book, DialecticComment, Question, Review, ThemeMode } from './types';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { HomeFeedView } from './components/HomeFeedView';
@@ -33,7 +33,6 @@ const INITIAL_USER: UserProfile = {
 const INITIAL_COLLOQUIUM_COMMENTS: DialecticComment[] = [];
 const INITIAL_QUESTIONS: Question[] = [];
 const INITIAL_REVIEWS: Review[] = [];
-const INITIAL_BOOKMARKS: Bookmark[] = [];
 
 export const App: React.FC = () => {
   // --- GLOBAL STATE (Routing, Auth, Theme) ---
@@ -64,7 +63,6 @@ export const App: React.FC = () => {
   // --- FEATURE STATE (Will be moved to components later) ---
   const [questions, setQuestions] = useState<Question[]>(INITIAL_QUESTIONS);
   const [colloquiumComments, setColloquiumComments] = useState<DialecticComment[]>(INITIAL_COLLOQUIUM_COMMENTS);
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>(INITIAL_BOOKMARKS);
 
   const showToast = (msg: string) => setToastMessage(msg);
 
@@ -276,12 +274,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // --- BOOKMARKS HANDLERS ---
-  const handleAddBookmark = (b: Bookmark) => setBookmarks(prev => [b, ...prev]);
-  const handleUpdateBookmark = (id: string, updated: Partial<Bookmark>) => setBookmarks(prev => prev.map(b => b.id === id ? { ...b, ...updated } : b));
-  const handleDeleteBookmark = (id: string) => setBookmarks(prev => prev.filter(b => b.id !== id));
-
-
   return (
     <div className="min-h-screen bg-theme-app text-theme-body relative flex flex-col font-sans antialiased selection:bg-theme-accent-light selection:text-theme-accent transition-colors duration-200">
       
@@ -328,9 +320,11 @@ export const App: React.FC = () => {
 
         {currentScreen === 'library' && (
           <SavedView
-            bookmarks={bookmarks} books={books} initialTab="library" userId={authUserId}
-            onAddBookmark={handleAddBookmark} onUpdateBookmark={handleUpdateBookmark} onDeleteBookmark={handleDeleteBookmark}
+            books={books} initialTab="library" userId={authUserId}
             onSelectBook={handleSelectBook}
+            onSelectDiscussion={setTargetQuestionId}
+            onSelectReview={setTargetReviewId}
+            onSelectPath={setSelectedPathId}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onShowToast={showToast}
           />
@@ -450,9 +444,11 @@ export const App: React.FC = () => {
 
         {currentScreen === 'bookmarks' && (
           <SavedView
-            bookmarks={bookmarks} books={books} initialTab="bookmarks" userId={authUserId}
-            onAddBookmark={handleAddBookmark} onUpdateBookmark={handleUpdateBookmark} onDeleteBookmark={handleDeleteBookmark}
+            books={books} initialTab="bookmarks" userId={authUserId}
             onSelectBook={handleSelectBook}
+            onSelectDiscussion={setTargetQuestionId}
+            onSelectReview={setTargetReviewId}
+            onSelectPath={setSelectedPathId}
             onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onShowToast={showToast}
           />
