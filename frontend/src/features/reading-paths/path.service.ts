@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase';
-import { Book, Difficulty, ReadingPath, ReadingPathBook, SavedPath } from '../../types';
+import { Book, Difficulty, ReadingPath, ReadingPathBook } from '../../types';
 
 export type ReadingPathBookWithDetails = ReadingPathBook & {
   book: Pick<Book, 'id' | 'title' | 'cover_url' | 'author_name'>
@@ -44,22 +44,6 @@ export const loadReadingPathBooks = async (pathId: string): Promise<ReadingPathB
     .order('position', { ascending: true });
   if (error) throw error;
   return (data ?? []) as ReadingPathBookWithDetails[];
-};
-
-export const loadSavedPaths = async (userId: string): Promise<SavedPath[]> => {
-  const { data, error } = await supabase
-    .from('saved_paths')
-    .select('*')
-    .eq('user_id', userId);
-  if (error) throw error;
-  return (data ?? []) as SavedPath[];
-};
-
-export const toggleSavePath = async (userId: string, pathId: string, isSaved: boolean): Promise<void> => {
-  const result = isSaved
-    ? await supabase.from('saved_paths').delete().eq('user_id', userId).eq('path_id', pathId)
-    : await supabase.from('saved_paths').insert({ user_id: userId, path_id: pathId });
-  if (result.error) throw result.error;
 };
 
 export const createReadingPath = async (
