@@ -32,7 +32,7 @@ export interface Book {
   description: string | null;
   cover_url: string | null;
   language: string;
-  page_count: number | null;
+  page_count: number;
   verification_status: VerificationStatus;
   created_by: string | null;
   created_at: string;

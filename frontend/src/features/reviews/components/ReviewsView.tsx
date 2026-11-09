@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Book, Review, ReviewLike, ScreenId, UserProfile } from '../../../types';
@@ -41,6 +40,11 @@ interface ReviewsViewProps {
     rating: number;
     quote?: string | null;
   }) => Promise<{ ok: boolean; error?: string }>;
+
+  // Uploads a cover photo (e.g. to Supabase Storage) and returns its public URL.
+  onUploadCover?: (
+    file: File
+  ) => Promise<{ ok: boolean; url?: string; error?: string }>;
 
   onUpdateReview?: (
     id: string,
@@ -132,6 +136,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   targetReviewId,
   onClearTargetReview,
   onAddReview,
+  onUploadCover,
   onUpdateReview,
   onDeleteReview,
   onSelectBook,
@@ -210,7 +215,39 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const [newBookTitle, setNewBookTitle] = useState('');
   const [newBookAuthor, setNewBookAuthor] = useState('');
   const [newBookLanguage, setNewBookLanguage] = useState('en');
+  const [newPageCount, setNewPageCount] = useState('');
+  const [newCoverFile, setNewCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [newRating, setNewRating] = useState(5);
+
+  useEffect(() => {
+    if (!newCoverFile) {
+      setCoverPreview(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(newCoverFile);
+    setCoverPreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [newCoverFile]);
+
+  const handleCoverFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      onShowToast(isAmharic ? 'እባክዎ ምስል ይምረጡ።' : 'Please choose an image file.');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      onShowToast(isAmharic ? 'ምስሉ ከ5MB መብለጥ የለበትም።' : 'Image must be 5 MB or smaller.');
+      return;
+    }
+
+    setNewCoverFile(file);
+  };
   const [newQuote, setNewQuote] = useState('');
   const [newFullReview, setNewFullReview] = useState('');
 
@@ -335,6 +372,8 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     setNewBookTitle('');
     setNewBookAuthor('');
     setNewBookLanguage('en');
+    setNewPageCount('');
+    setNewCoverFile(null);
     setNewRating(5);
     setNewQuote('');
     setNewFullReview('');
@@ -462,6 +501,19 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       return;
     }
 
+    const pageCount = Number(newPageCount);
+
+    if (isNewBook) {
+      if (!newPageCount.trim() || !Number.isInteger(pageCount) || pageCount < 1) {
+        onShowToast(
+          isAmharic
+            ? 'የገጾች ብዛት ያስገቡ።'
+            : 'Please enter the number of pages.'
+        );
+        return;
+      }
+    }
+
     if (
       !Number.isFinite(newRating) ||
       newRating < 1 ||
@@ -478,6 +530,28 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       return;
     }
 
+    if (isSubmitting) return;
+
+    let coverUrl: string | null = null;
+
+    if (isNewBook && newCoverFile) {
+      if (!onUploadCover) {
+        onShowToast('Cover upload is not connected.');
+        return;
+      }
+
+      setIsSubmitting(true);
+      const upload = await onUploadCover(newCoverFile);
+      setIsSubmitting(false);
+
+      if (!upload.ok || !upload.url) {
+        onShowToast(upload.error || 'Could not upload the cover photo.');
+        return;
+      }
+
+      coverUrl = upload.url;
+    }
+
     const values = {
       ...(selectedBook ? { book_id: selectedBook.id } : {}),
       ...(isNewBook
@@ -485,6 +559,8 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
             bookTitle: titleForNewBook,
             bookAuthor: newBookAuthor.trim(),
             language: newBookLanguage,
+            page_count: pageCount,
+            cover_url: coverUrl || null,
           }
         : {}),
       rating: Math.round(newRating),
@@ -1084,6 +1160,63 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                         <option value="other">Other</option>
                       </select>
                     </label>
+
+                    <label className="block text-xs text-theme-muted">
+                      {isAmharic ? 'የገጾች ብዛት *' : 'Page count *'}
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        required
+                        inputMode="numeric"
+                        value={newPageCount}
+                        onChange={(e) => setNewPageCount(e.target.value)}
+                        placeholder="e.g. 320"
+                        className="mt-1 w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-sm text-theme-main"
+                      />
+                    </label>
+
+                    <div className="text-xs text-theme-muted">
+                      <span className="block">
+                        {isAmharic ? 'የሽፋን ፎቶ (አማራጭ)' : 'Cover photo (optional)'}
+                      </span>
+
+                      {coverPreview ? (
+                        <div className="mt-2 flex items-end gap-3">
+                          <img
+                            src={coverPreview}
+                            alt="Cover preview"
+                            className="h-28 w-auto rounded object-cover border border-theme"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setNewCoverFile(null)}
+                            className="text-theme-accent hover:underline"
+                          >
+                            {isAmharic ? 'አስወግድ' : 'Remove'}
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-theme bg-theme-subtle p-3 hover:border-theme-accent">
+                          <span className="material-symbols-outlined text-[18px]">
+                            add_photo_alternate
+                          </span>
+                          {isAmharic ? 'ፎቶ ይስቀሉ' : 'Upload a photo'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleCoverFileChange}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    {isSubmitting && (
+                      <p className="text-[11px] text-theme-muted">
+                        {isAmharic ? 'ፎቶ በመስቀል ላይ...' : 'Uploading photo...'}
+                      </p>
+                    )}
 
                     <p className="text-[11px] text-theme-muted">
                       {isAmharic

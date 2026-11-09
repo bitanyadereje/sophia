@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bookmark, BookmarkCheck, Plus, X } from 'lucide-react';
+import { Bookmark, BookmarkCheck, ImagePlus, Plus, X } from 'lucide-react';
 import { Book, Difficulty, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { addBooksToPath, approvePath, createReadingPath, loadPendingPaths, loadReadingPathBooks, loadReadingPaths } from '../path.service';
@@ -17,6 +17,20 @@ interface PathsViewProps {
   onSelectBook: (bookId: string) => void;
   books: Book[];
   isAdmin: boolean;
+
+  // Creates a catalog book (submitted for verification) and returns its new ID.
+  onCreateBook?: (input: {
+    title: string;
+    author: string;
+    language: string;
+    page_count: number;
+    cover_url: string | null;
+  }) => Promise<{ ok: boolean; bookId?: string; error?: string }>;
+
+  // Uploads a cover photo (e.g. to Supabase Storage) and returns its public URL.
+  onUploadCover?: (
+    file: File
+  ) => Promise<{ ok: boolean; url?: string; error?: string }>;
 }
 
 export const PathsView: React.FC<PathsViewProps> = ({
@@ -30,6 +44,8 @@ export const PathsView: React.FC<PathsViewProps> = ({
   onSelectBook,
   books,
   isAdmin,
+  onCreateBook,
+  onUploadCover,
 }) => {
   const { isAmharic } = useLanguage();
   const queryClient = useQueryClient();
@@ -59,6 +75,125 @@ export const PathsView: React.FC<PathsViewProps> = ({
   const [selectedBooks, setSelectedBooks] = useState<string[]>([]);
   const [bookSearch, setBookSearch] = useState('');
   const [newPath, setNewPath] = useState({ title: '', description: '', topic: '', difficulty: 'beginner' as Difficulty });
+
+  // Books created from this modal that may not be in the `books` prop yet.
+  const [createdBooks, setCreatedBooks] = useState<Record<string, { title: string; author_name: string }>>({});
+  const [newBookTitle, setNewBookTitle] = useState('');
+  const [newBookAuthor, setNewBookAuthor] = useState('');
+  const [newBookLanguage, setNewBookLanguage] = useState('en');
+  const [newPageCount, setNewPageCount] = useState('');
+  const [newCoverFile, setNewCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [isAddingBook, setIsAddingBook] = useState(false);
+
+  useEffect(() => {
+    if (!newCoverFile) {
+      setCoverPreview(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(newCoverFile);
+    setCoverPreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [newCoverFile]);
+
+  const resetNewBookForm = () => {
+    setNewBookTitle('');
+    setNewBookAuthor('');
+    setNewBookLanguage('en');
+    setNewPageCount('');
+    setNewCoverFile(null);
+  };
+
+  const handleCoverFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      onShowToast(isAmharic ? 'እባክዎ ምስል ይምረጡ።' : 'Please choose an image file.');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      onShowToast(isAmharic ? 'ምስሉ ከ5MB መብለጥ የለበትም።' : 'Image must be 5 MB or smaller.');
+      return;
+    }
+
+    setNewCoverFile(file);
+  };
+
+  const handleAddNewBook = async () => {
+    if (isAddingBook) return;
+
+    if (!userId) {
+      onShowToast('Please sign in to add a book.');
+      return;
+    }
+
+    const title = (newBookTitle || bookSearch).trim();
+    const author = newBookAuthor.trim();
+    const pageCount = Number(newPageCount);
+
+    if (!title || !author) {
+      onShowToast(isAmharic ? 'የመጽሐፉን ርዕስ እና ደራሲ ያስገቡ።' : 'Enter the book title and author.');
+      return;
+    }
+
+    if (!newPageCount.trim() || !Number.isInteger(pageCount) || pageCount < 1) {
+      onShowToast(isAmharic ? 'የገጾች ብዛት ያስገቡ።' : 'Please enter the number of pages.');
+      return;
+    }
+
+    if (!onCreateBook) {
+      onShowToast('Adding books is not connected.');
+      return;
+    }
+
+    setIsAddingBook(true);
+
+    try {
+      let coverUrl: string | null = null;
+
+      if (newCoverFile) {
+        if (!onUploadCover) {
+          onShowToast('Cover upload is not connected.');
+          return;
+        }
+
+        const upload = await onUploadCover(newCoverFile);
+
+        if (!upload.ok || !upload.url) {
+          onShowToast(upload.error || 'Could not upload the cover photo.');
+          return;
+        }
+
+        coverUrl = upload.url;
+      }
+
+      const result = await onCreateBook({
+        title,
+        author,
+        language: newBookLanguage,
+        page_count: pageCount,
+        cover_url: coverUrl,
+      });
+
+      if (!result.ok || !result.bookId) {
+        onShowToast(result.error || 'Could not add the book.');
+        return;
+      }
+
+      const createdId = result.bookId;
+      setCreatedBooks((current) => ({ ...current, [createdId]: { title, author_name: author } }));
+      setSelectedBooks((current) => (current.includes(createdId) ? current : [...current, createdId]));
+      setBookSearch('');
+      resetNewBookForm();
+      onShowToast(isAmharic ? 'መጽሐፉ ተጨምሯል' : 'Book added to the path.');
+    } finally {
+      setIsAddingBook(false);
+    }
+  };
+
   const createPathMutation = useMutation({
     mutationFn: async () => {
       const path = await createReadingPath(userId!, newPath.title.trim(), newPath.description.trim(), newPath.topic.trim(), newPath.difficulty);
@@ -66,11 +201,16 @@ export const PathsView: React.FC<PathsViewProps> = ({
       return path;
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['paths'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['paths'] }),
+        queryClient.invalidateQueries({ queryKey: ['books'] }),
+      ]);
       setIsCreateModalOpen(false);
       setNewPath({ title: '', description: '', topic: '', difficulty: 'beginner' });
       setSelectedBooks([]);
+      setCreatedBooks({});
       setBookSearch('');
+      resetNewBookForm();
       onShowToast('Reading path submitted for review.');
     },
     onError: () => onShowToast('Could not create reading path.'),
@@ -406,7 +546,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
       </div>
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="create-path-title">
-          <form onSubmit={(event) => { event.preventDefault(); createPathMutation.mutate(); }} className="w-full max-w-lg rounded-2xl border border-theme bg-theme-surface p-6 shadow-xl">
+          <form onSubmit={(event) => { event.preventDefault(); createPathMutation.mutate(); }} className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-theme bg-theme-surface p-6 shadow-xl">
             <div className="mb-5 flex items-center justify-between"><h2 id="create-path-title" className="font-serif text-xl font-bold text-theme-main">Create a Reading Path</h2><button type="button" onClick={() => setIsCreateModalOpen(false)} aria-label="Close"><X size={20} /></button></div>
             <div className="space-y-4">
               <label className="block text-sm text-theme-body">Title<input required maxLength={120} value={newPath.title} onChange={(e) => setNewPath({ ...newPath, title: e.target.value })} className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2" /></label>
@@ -419,15 +559,133 @@ export const PathsView: React.FC<PathsViewProps> = ({
                 {bookSearch.trim() && <ul className="mt-2 max-h-36 overflow-y-auto rounded-lg border border-theme">
                   {matchingBooks.length ? matchingBooks.map((book) => <li key={book.id}><button type="button" onClick={() => setSelectedBooks((current) => [...current, book.id])} className="w-full px-3 py-2 text-left hover:bg-theme-subtle">{book.title}{book.author_name ? ` — ${book.author_name}` : ''}</button></li>) : <li className="px-3 py-2 text-theme-muted">No matching books</li>}
                 </ul>}
+
+                {/* Book not in the catalog: add it here */}
+                {bookSearch.trim() && (
+                  <div
+                    className="mt-3 space-y-3 rounded-lg border border-theme p-3"
+                    onKeyDown={(e) => {
+                      // Keep Enter in these fields from submitting the whole path form.
+                      if (e.key === 'Enter') e.preventDefault();
+                    }}
+                  >
+                    <p className="text-xs font-semibold text-theme-main">
+                      {matchingBooks.length === 0
+                        ? (isAmharic ? 'መጽሐፉ አልተገኘም። ዝርዝሩን ያስገቡ።' : 'No matching book. Enter its details.')
+                        : (isAmharic ? 'መጽሐፉን አልተገኘም? ዝርዝሩን ያስገቡ።' : 'Can’t find the right book? Enter its details.')}
+                    </p>
+
+                    <label className="block text-xs text-theme-muted">
+                      {isAmharic ? 'የመጽሐፍ ርዕስ *' : 'Book title *'}
+                      <input
+                        value={newBookTitle || bookSearch}
+                        onChange={(e) => {
+                          setNewBookTitle(e.target.value);
+                          setBookSearch(e.target.value);
+                        }}
+                        className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2 text-sm text-theme-main"
+                      />
+                    </label>
+
+                    <label className="block text-xs text-theme-muted">
+                      {isAmharic ? 'ደራሲ *' : 'Author *'}
+                      <input
+                        value={newBookAuthor}
+                        onChange={(e) => setNewBookAuthor(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2 text-sm text-theme-main"
+                      />
+                    </label>
+
+                    <label className="block text-xs text-theme-muted">
+                      {isAmharic ? 'ቋንቋ' : 'Language'}
+                      <select
+                        value={newBookLanguage}
+                        onChange={(e) => setNewBookLanguage(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2 text-sm text-theme-main"
+                      >
+                        <option value="en">English</option>
+                        <option value="am">Amharic</option>
+                        <option value="gez">Geez</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </label>
+
+                    <label className="block text-xs text-theme-muted">
+                      {isAmharic ? 'የገጾች ብዛት *' : 'Page count *'}
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        inputMode="numeric"
+                        value={newPageCount}
+                        onChange={(e) => setNewPageCount(e.target.value)}
+                        placeholder="e.g. 320"
+                        className="mt-1 w-full rounded-lg border border-theme bg-theme-app px-3 py-2 text-sm text-theme-main"
+                      />
+                    </label>
+
+                    <div className="text-xs text-theme-muted">
+                      <span className="block">
+                        {isAmharic ? 'የሽፋን ፎቶ (አማራጭ)' : 'Cover photo (optional)'}
+                      </span>
+
+                      {coverPreview ? (
+                        <div className="mt-2 flex items-end gap-3">
+                          <img
+                            src={coverPreview}
+                            alt="Cover preview"
+                            className="h-28 w-auto rounded object-cover border border-theme"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setNewCoverFile(null)}
+                            className="text-theme-accent hover:underline"
+                          >
+                            {isAmharic ? 'አስወግድ' : 'Remove'}
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-theme bg-theme-subtle p-3 hover:border-theme-accent">
+                          <ImagePlus size={16} />
+                          {isAmharic ? 'ፎቶ ይስቀሉ' : 'Upload a photo'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleCoverFileChange}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] text-theme-muted">
+                      {isAmharic
+                        ? 'መጽሐፉ ለማረጋገጫ በካታሎጉ ውስጥ ይጨመራል።'
+                        : 'The book will be submitted to the catalog for verification.'}
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleAddNewBook()}
+                      disabled={isAddingBook}
+                      className="w-full rounded-lg bg-theme-main px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      {isAddingBook
+                        ? (isAmharic ? 'በመጨመር ላይ...' : 'Adding book...')
+                        : (isAmharic ? 'መጽሐፉን ጨምር' : 'Add book to path')}
+                    </button>
+                  </div>
+                )}
+
                 {selectedBooks.length > 0 && <ol className="mt-3 space-y-2">
                   {selectedBooks.map((bookId, index) => {
-                    const book = books.find(({ id }) => id === bookId);
+                    const book = books.find(({ id }) => id === bookId) ?? createdBooks[bookId];
                     return <li key={bookId} className="flex items-center justify-between rounded-lg border border-theme px-3 py-2"><span>{index + 1}. {book?.title ?? 'Book'}</span><button type="button" onClick={() => setSelectedBooks((current) => current.filter((id) => id !== bookId))} className="text-xs text-theme-muted hover:text-theme-main">Remove</button></li>;
                   })}
                 </ol>}
               </div>
             </div>
-            <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setIsCreateModalOpen(false)} className="rounded-lg border border-theme px-4 py-2 text-sm">Cancel</button><button type="submit" disabled={createPathMutation.isPending} className="rounded-lg bg-theme-main px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{createPathMutation.isPending ? 'Submitting…' : 'Submit for review'}</button></div>
+            <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setIsCreateModalOpen(false)} className="rounded-lg border border-theme px-4 py-2 text-sm">Cancel</button><button type="submit" disabled={createPathMutation.isPending || isAddingBook} className="rounded-lg bg-theme-main px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{createPathMutation.isPending ? 'Submitting…' : 'Submit for review'}</button></div>
           </form>
         </div>
       )}

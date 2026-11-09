@@ -59,7 +59,7 @@ export const findOrCreateBook = async (
   const { data: created, error: createError } = await supabase
     .from('books')
     .insert({ title, author_name: author, language: input.language ?? 'en', cover_url: input.cover_url ?? null,
-      page_count: input.page_count ?? null, verification_status: 'unverified', created_by: userId })
+      page_count: input.page_count, verification_status: 'unverified', created_by: userId })
     .select('*').single();
   if (createError) throw createError;
   const createdBook = created as Book;
