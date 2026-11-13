@@ -24,13 +24,8 @@ interface PathsViewProps {
     author: string;
     language: string;
     page_count: number;
-    cover_url: string | null;
+    coverFile?: File | null;
   }) => Promise<{ ok: boolean; bookId?: string; error?: string }>;
-
-  // Uploads a cover photo (e.g. to Supabase Storage) and returns its public URL.
-  onUploadCover?: (
-    file: File
-  ) => Promise<{ ok: boolean; url?: string; error?: string }>;
 }
 
 export const PathsView: React.FC<PathsViewProps> = ({
@@ -45,7 +40,6 @@ export const PathsView: React.FC<PathsViewProps> = ({
   books,
   isAdmin,
   onCreateBook,
-  onUploadCover,
 }) => {
   const { isAmharic } = useLanguage();
   const queryClient = useQueryClient();
@@ -123,9 +117,14 @@ export const PathsView: React.FC<PathsViewProps> = ({
   };
 
   const handleAddNewBook = async () => {
-    if (isAddingBook) return;
+    console.debug('[book-debug] PathsView.handleAddNewBook submitted values', { title: newBookTitle || bookSearch, author: newBookAuthor, language: newBookLanguage, page_count: newPageCount, coverFile: newCoverFile ? { name: newCoverFile.name, size: newCoverFile.size } : null });
+    if (isAddingBook) {
+      console.debug('[book-debug] PathsView.handleAddNewBook validation exit: already adding book');
+      return;
+    }
 
     if (!userId) {
+      console.debug('[book-debug] PathsView.handleAddNewBook validation exit: missing userId');
       onShowToast('Please sign in to add a book.');
       return;
     }
@@ -135,16 +134,19 @@ export const PathsView: React.FC<PathsViewProps> = ({
     const pageCount = Number(newPageCount);
 
     if (!title || !author) {
+      console.debug('[book-debug] PathsView.handleAddNewBook validation exit: missing title or author');
       onShowToast(isAmharic ? 'የመጽሐፉን ርዕስ እና ደራሲ ያስገቡ።' : 'Enter the book title and author.');
       return;
     }
 
     if (!newPageCount.trim() || !Number.isInteger(pageCount) || pageCount < 1) {
+      console.debug('[book-debug] PathsView.handleAddNewBook validation exit: invalid page_count');
       onShowToast(isAmharic ? 'የገጾች ብዛት ያስገቡ።' : 'Please enter the number of pages.');
       return;
     }
 
     if (!onCreateBook) {
+      console.debug('[book-debug] PathsView.handleAddNewBook validation exit: missing onCreateBook');
       onShowToast('Adding books is not connected.');
       return;
     }
@@ -152,35 +154,16 @@ export const PathsView: React.FC<PathsViewProps> = ({
     setIsAddingBook(true);
 
     try {
-      let coverUrl: string | null = null;
-
-      if (newCoverFile) {
-        if (!onUploadCover) {
-          onShowToast('Cover upload is not connected.');
-          return;
-        }
-
-        const upload = await onUploadCover(newCoverFile);
-
-        if (!upload.ok || !upload.url) {
-          onShowToast(upload.error || 'Could not upload the cover photo.');
-          return;
-        }
-
-        coverUrl = upload.url;
-      }
-
       const result = await onCreateBook({
         title,
         author,
         language: newBookLanguage,
         page_count: pageCount,
-        cover_url: coverUrl,
+        coverFile: newCoverFile,
       });
 
       if (!result.ok || !result.bookId) {
-        onShowToast(result.error || 'Could not add the book.');
-        return;
+        throw new Error(result.error || 'Could not add the book.');
       }
 
       const createdId = result.bookId;
@@ -189,6 +172,9 @@ export const PathsView: React.FC<PathsViewProps> = ({
       setBookSearch('');
       resetNewBookForm();
       onShowToast(isAmharic ? 'መጽሐፉ ተጨምሯል' : 'Book added to the path.');
+    } catch (error) {
+      console.error('[book-debug] PathsView.handleAddNewBook error', error);
+      onShowToast(error instanceof Error ? error.message : 'Could not add the book.');
     } finally {
       setIsAddingBook(false);
     }
@@ -213,7 +199,10 @@ export const PathsView: React.FC<PathsViewProps> = ({
       resetNewBookForm();
       onShowToast('Reading path submitted for review.');
     },
-    onError: () => onShowToast('Could not create reading path.'),
+    onError: (error) => {
+      console.error('[book-debug] createPathMutation error', error);
+      onShowToast(error instanceof Error ? error.message : 'Could not create reading path.');
+    },
   });
   const activePath = paths.find((path) => path.id === selectedPathId) ?? paths[0] ?? null;
   const { data: pathBooks = [], isPending: arePathBooksPending } = useQuery({
