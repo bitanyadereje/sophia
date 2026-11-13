@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ScreenId, UserProfile, Book, DialecticComment, Question, Review, ThemeMode } from './types';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -35,6 +36,7 @@ const INITIAL_QUESTIONS: Question[] = [];
 const INITIAL_REVIEWS: Review[] = [];
 
 export const App: React.FC = () => {
+  const queryClient = useQueryClient();
   // --- GLOBAL STATE (Routing, Auth, Theme) ---
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('home');
   const [user, setUser] = useState<UserProfile>(INITIAL_USER);
@@ -212,17 +214,16 @@ export const App: React.FC = () => {
   };
 
   // --- BOOK HANDLERS ---
-  const handleAddBook = async (newBookData: { title: string; author_name: string }) => {
+  const handleCreateBook = async (input: { title: string; author: string; language: string; page_count: number; coverFile?: File | null }): Promise<{ ok: boolean; bookId?: string; error?: string }> => {
+    if (!authUserId) return { ok: false, error: 'You must be signed in to add a new book.' };
     try {
-      const book = await findOrCreateBook(newBookData, authUserId, books, (resolved) =>
-        setBooks((previous) => previous.some((item) => item.id === resolved.id) ? previous : [resolved, ...previous]),
-      );
-      showToast(book.verification_status === 'verified' ? 'Book found in catalog.' : 'Book found or submitted for verification.');
-      return book;
+      const book = await findOrCreateBook(input, authUserId);
+      setBooks((previous) => previous.some((item) => item.id === book.id) ? previous : [book, ...previous]);
+      await queryClient.invalidateQueries({ queryKey: ['books'] });
+      return { ok: true, bookId: book.id };
     } catch (error) {
-      console.error('Failed to find or add book:', error);
-      showToast(error instanceof Error ? error.message : 'Could not add book.');
-      return null;
+      console.error('[book-debug] handleCreateBook error', error);
+      return { ok: false, error: error instanceof Error ? error.message : 'Could not add book.' };
     }
   };
 
@@ -231,17 +232,22 @@ export const App: React.FC = () => {
     if (!authUserId) return { ok: false, error: 'You must be signed in to publish a review.' };
     
     try {
-      const book = await findOrCreateBook({
-        book_id: data.book_id, bookTitle: data.bookTitle, bookAuthor: data.bookAuthor,
-        title: data.title, author_name: data.author_name, language: data.language,
-        cover_url: data.cover_url, page_count: data.page_count,
-      }, authUserId, books, (resolved) =>
-        setBooks((previous) => previous.some((item) => item.id === resolved.id) ? previous : [resolved, ...previous]),
-      );
+      let bookId = data.book_id as string | undefined;
+      if (!bookId) {
+        const created = await handleCreateBook({
+          title: data.bookTitle,
+          author: data.bookAuthor,
+          language: data.language,
+          page_count: data.page_count,
+          coverFile: data.coverFile,
+        });
+        if (!created.ok || !created.bookId) throw new Error(created.error || 'Could not create the book.');
+        bookId = created.bookId;
+      }
 
       const newReview = await createReview(authUserId, {
-        book_id: book.id, 
-        title: data.reviewTitle ?? (data.book_id ? data.title ?? null : null),
+        book_id: bookId,
+        title: data.reviewTitle ?? data.title ?? null,
         content: data.content, rating: data.rating, quote: data.quote || null,
       });
       
@@ -279,7 +285,7 @@ export const App: React.FC = () => {
       
       {/* TOAST */}
       {toastMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-theme-main text-theme-surface text-xs font-label-md rounded-full shadow-lg border border-theme-subtle/40 flex items-center gap-2 animate-fade-in pointer-events-none">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 bg-theme-main text-theme-surface text-xs font-label-md rounded-full shadow-lg border border-theme-subtle/40 flex items-center gap-2 animate-fade-in pointer-events-none">
           <span className="w-2 h-2 rounded-full bg-theme-accent"></span>
           <span>{toastMessage}</span>
         </div>
@@ -385,6 +391,7 @@ export const App: React.FC = () => {
             onSelectBook={handleSelectBook}
             books={books}
             isAdmin={isAdmin}
+            onCreateBook={handleCreateBook}
           />
         )}
 
@@ -400,6 +407,7 @@ export const App: React.FC = () => {
             onSelectBook={handleSelectBook}
             books={books}
             isAdmin={isAdmin}
+            onCreateBook={handleCreateBook}
           />
         )}
 

@@ -33,18 +33,13 @@ interface ReviewsViewProps {
     bookTitle?: string;
     bookAuthor?: string;
     language?: string;
-    cover_url?: string | null;
     page_count?: number | null;
+    coverFile?: File | null;
     title?: string | null;
     content: string;
     rating: number;
     quote?: string | null;
   }) => Promise<{ ok: boolean; error?: string }>;
-
-  // Uploads a cover photo (e.g. to Supabase Storage) and returns its public URL.
-  onUploadCover?: (
-    file: File
-  ) => Promise<{ ok: boolean; url?: string; error?: string }>;
 
   onUpdateReview?: (
     id: string,
@@ -136,7 +131,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   targetReviewId,
   onClearTargetReview,
   onAddReview,
-  onUploadCover,
   onUpdateReview,
   onDeleteReview,
   onSelectBook,
@@ -472,8 +466,10 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     e: React.FormEvent
   ) => {
     e.preventDefault();
+    console.debug('[book-debug] ReviewsView.handleSubmitReview submitted values', { bookId: newBookId, title: newBookTitle || bookSearch, author: newBookAuthor, language: newBookLanguage, page_count: newPageCount, coverFile: newCoverFile ? { name: newCoverFile.name, size: newCoverFile.size } : null, rating: newRating, hasContent: Boolean(newFullReview.trim()), editing: Boolean(editingReview) });
 
     if (!authUserId) {
+      console.debug('[book-debug] ReviewsView.handleSubmitReview validation exit: missing authUserId');
       onShowToast('Please sign in to publish a review.');
       return;
     }
@@ -486,6 +482,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     const titleForNewBook = (newBookTitle || bookSearch).trim();
 
     if (editingReview && !newBookId.trim()) {
+      console.debug('[book-debug] ReviewsView.handleSubmitReview validation exit: editing review missing book');
       onShowToast('Please choose a book.');
       return;
     }
@@ -495,6 +492,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       !selectedBook &&
       (!titleForNewBook || !newBookAuthor.trim())
     ) {
+      console.debug('[book-debug] ReviewsView.handleSubmitReview validation exit: new book missing title or author');
       onShowToast(
         'Enter the book title and author, or select an existing book.'
       );
@@ -505,6 +503,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
 
     if (isNewBook) {
       if (!newPageCount.trim() || !Number.isInteger(pageCount) || pageCount < 1) {
+        console.debug('[book-debug] ReviewsView.handleSubmitReview validation exit: invalid page_count');
         onShowToast(
           isAmharic
             ? 'የገጾች ብዛት ያስገቡ።'
@@ -519,6 +518,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       newRating < 1 ||
       newRating > 5
     ) {
+      console.debug('[book-debug] ReviewsView.handleSubmitReview validation exit: invalid rating');
       onShowToast('Rating must be between 1 and 5.');
       return;
     }
@@ -526,30 +526,14 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     const content = newFullReview.trim();
 
     if (!content) {
+      console.debug('[book-debug] ReviewsView.handleSubmitReview validation exit: missing content');
       onShowToast('Please write a detailed review.');
       return;
     }
 
-    if (isSubmitting) return;
-
-    let coverUrl: string | null = null;
-
-    if (isNewBook && newCoverFile) {
-      if (!onUploadCover) {
-        onShowToast('Cover upload is not connected.');
-        return;
-      }
-
-      setIsSubmitting(true);
-      const upload = await onUploadCover(newCoverFile);
-      setIsSubmitting(false);
-
-      if (!upload.ok || !upload.url) {
-        onShowToast(upload.error || 'Could not upload the cover photo.');
-        return;
-      }
-
-      coverUrl = upload.url;
+    if (isSubmitting) {
+      console.debug('[book-debug] ReviewsView.handleSubmitReview validation exit: already submitting');
+      return;
     }
 
     const values = {
@@ -560,7 +544,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
             bookAuthor: newBookAuthor.trim(),
             language: newBookLanguage,
             page_count: pageCount,
-            cover_url: coverUrl || null,
+            coverFile: newCoverFile,
           }
         : {}),
       rating: Math.round(newRating),
@@ -569,34 +553,27 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       title: null,
     };
 
-    if (editingReview) {
-      if (!onUpdateReview) {
-        onShowToast('Review editing is not connected.');
-        return;
+    setIsSubmitting(true);
+    try {
+      if (editingReview) {
+        if (!onUpdateReview) throw new Error('Review editing is not connected.');
+        const result = await onUpdateReview(editingReview.id, values);
+        if (!result.ok) throw new Error(result.error || 'Could not update review.');
+        onShowToast(isAmharic ? 'ዳሰሳው ተሻሽሏል' : 'Review updated.');
+      } else {
+        const result = await onAddReview(values);
+        if (!result.ok) throw new Error(result.error || 'Could not publish review.');
+        onShowToast(isAmharic ? 'ዳሰሳው ታትሟል' : 'Review published.');
       }
-
-      const result = await onUpdateReview(editingReview.id, values);
-
-      if (!result.ok) {
-        onShowToast(result.error || 'Could not update review.');
-        return;
-      }
-
-      onShowToast(isAmharic ? 'ዳሰሳው ተሻሽሏል' : 'Review updated.');
-    } else {
-      const result = await onAddReview(values);
-
-      if (!result.ok) {
-        onShowToast(result.error || 'Could not publish review.');
-        return;
-      }
-
-      onShowToast(isAmharic ? 'ዳሰሳው ታትሟል' : 'Review published.');
+      resetForm();
+      setIsWriteReviewOpen(false);
+      await queryClient.invalidateQueries({ queryKey: feedKey });
+    } catch (error) {
+      console.error('[book-debug] ReviewsView.handleSubmitReview error', error);
+      onShowToast(error instanceof Error ? error.message : 'Could not publish review.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    resetForm();
-    setIsWriteReviewOpen(false);
-    await queryClient.invalidateQueries({ queryKey: feedKey });
   };
 
   const closeForm = () => {
@@ -1289,7 +1266,8 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
               </button>
               <button
                 type="submit"
-                className="flex-1 py-2.5 rounded-lg bg-theme-main text-white text-xs font-semibold hover:opacity-90"
+                disabled={isSubmitting}
+                className="flex-1 py-2.5 rounded-lg bg-theme-main text-white text-xs font-semibold hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {editingReview
                   ? (isAmharic ? 'ለውጦችን አስቀምጥ' : 'Save Changes')

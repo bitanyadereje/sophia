@@ -3,14 +3,14 @@ import { Book } from '../../types';
 
 export type BookInput = {
   book_id?: string;
-  bookTitle?: string;
-  bookAuthor?: string;
   title?: string;
-  author_name?: string;
+  author?: string;
   language?: string;
-  cover_url?: string | null;
-  page_count?: number | null;
+  page_count?: number;
+  coverFile?: File | null;
 };
+
+const COVER_BUCKET = 'book-covers';
 
 export const loadBooks = async (): Promise<Book[]> => {
   const { data, error } = await supabase.from('books').select('*');
@@ -21,48 +21,71 @@ export const loadBooks = async (): Promise<Book[]> => {
 const normalizeBookText = (value: string | null | undefined) =>
   (value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 
-/** Resolves a catalog selection or creates the same unverified record as the prior inline flow. */
-export const findOrCreateBook = async (
-  input: BookInput,
-  userId: string | null,
-  knownBooks: Book[],
-  onBookResolved?: (book: Book) => void,
-): Promise<Book> => {
+const escapeIlike = (value: string) => value.replace(/[\\%_]/g, '\\$&');
+
+const uploadCoverPhoto = async (file: File, userId: string): Promise<{ publicUrl: string; path: string }> => {
+  const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const path = `${userId}/${crypto.randomUUID()}.${extension}`;
+  console.debug('[book-debug] uploadCoverPhoto', { fileName: file.name, size: file.size, bucket: COVER_BUCKET });
+  const { error } = await supabase.storage.from(COVER_BUCKET).upload(path, file, { upsert: false });
+  if (error) {
+    console.error('[book-debug] uploadCoverPhoto error', { fileName: file.name, size: file.size, bucket: COVER_BUCKET, error });
+    throw error;
+  }
+  const { data } = supabase.storage.from(COVER_BUCKET).getPublicUrl(path);
+  return { publicUrl: data.publicUrl, path };
+};
+
+export const createBook = async (input: Required<Pick<BookInput, 'title' | 'author' | 'language' | 'page_count'>> & Pick<BookInput, 'coverFile'>, userId: string): Promise<Book> => {
+  let uploadedPath: string | null = null;
+  let coverUrl: string | null = null;
+  if (input.coverFile) {
+    const uploaded = await uploadCoverPhoto(input.coverFile, userId);
+    uploadedPath = uploaded.path;
+    coverUrl = uploaded.publicUrl;
+  }
+  const payload = { title: input.title.trim(), author_name: input.author.trim(), language: input.language || 'en', page_count: input.page_count, cover_url: coverUrl, verification_status: 'unverified' as const, created_by: userId };
+  console.debug('[book-debug] createBook insert payload', payload);
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  console.debug('[book-debug] createBook auth user compared with created_by', { authUserId: authData.user?.id ?? null, userId, matches: authData.user?.id === userId, authError: authError ? { code: authError.code, message: authError.message } : null });
+  const { data, error } = await supabase.from('books').insert(payload).select('*').single();
+  if (error) {
+    console.error('[book-debug] createBook insert error', { code: error.code, message: error.message, details: error.details, hint: error.hint });
+    if (uploadedPath) {
+      const { error: deleteError } = await supabase.storage.from(COVER_BUCKET).remove([uploadedPath]);
+      if (deleteError) console.error('[book-debug] upload cleanup error', { bucket: COVER_BUCKET, path: uploadedPath, error: deleteError });
+    }
+    throw error;
+  }
+  return data as Book;
+};
+
+/** Resolves a catalog selection or creates a single unverified record. */
+export const findOrCreateBook = async (input: BookInput, userId: string): Promise<Book> => {
   if (!userId) throw new Error('You must be signed in to add a new book.');
 
   if (input.book_id) {
-    const existing = knownBooks.find((book) => book.id === input.book_id);
-    if (existing) return existing;
     const { data, error } = await supabase.from('books').select('*').eq('id', input.book_id).maybeSingle();
     if (error) throw error;
     if (!data) throw new Error('That book could not be found. Search the catalog again.');
-    const found = data as Book;
-    onBookResolved?.(found);
-    return found;
+    return data as Book;
   }
 
-  const title = (input.bookTitle ?? input.title ?? '').trim();
-  const author = (input.bookAuthor ?? input.author_name ?? '').trim();
-  if (!title || !author) throw new Error('A book title and author are required.');
+  const title = input.title?.trim() ?? '';
+  const author = input.author?.trim() ?? '';
+  const normalizedTitle = normalizeBookText(title);
+  const normalizedAuthor = normalizeBookText(author);
+  if (!normalizedTitle || !normalizedAuthor) throw new Error('A book title and author are required.');
 
-  const { data: existingBooks, error: searchError } = await supabase.from('books').select('*');
+  const { data: candidates, error: searchError } = await supabase
+    .from('books').select('*')
+    .ilike('title', `%${escapeIlike(normalizedTitle).replace(/ /g, '%')}%`)
+    .ilike('author_name', `%${escapeIlike(normalizedAuthor).replace(/ /g, '%')}%`);
   if (searchError) throw searchError;
-  const match = (existingBooks ?? []).find((book: Book) =>
-    normalizeBookText(book.title) === normalizeBookText(title) &&
-    normalizeBookText(book.author_name) === normalizeBookText(author),
+  const match = (candidates ?? []).find((book: Book) =>
+    normalizeBookText(book.title) === normalizedTitle && normalizeBookText(book.author_name) === normalizedAuthor,
   ) as Book | undefined;
-  if (match) {
-    onBookResolved?.(match);
-    return match;
-  }
-
-  const { data: created, error: createError } = await supabase
-    .from('books')
-    .insert({ title, author_name: author, language: input.language ?? 'en', cover_url: input.cover_url ?? null,
-      page_count: input.page_count, verification_status: 'unverified', created_by: userId })
-    .select('*').single();
-  if (createError) throw createError;
-  const createdBook = created as Book;
-  onBookResolved?.(createdBook);
-  return createdBook;
+  if (match) return match;
+  if (!Number.isInteger(input.page_count) || (input.page_count ?? 0) < 1) throw new Error('Please enter the number of pages.');
+  return createBook({ title, author, language: input.language || 'en', page_count: input.page_count, coverFile: input.coverFile }, userId);
 };
