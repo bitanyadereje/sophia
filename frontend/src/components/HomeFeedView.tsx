@@ -6,6 +6,7 @@ import { loadUserLibrary, updateBookStatus } from '../features/library/library.s
 import { loadDiscussionsWithAuthors, loadAllReplies, loadDiscussionTopics } from '../features/discussions/services/discussion.service';
 import { loadReviews } from '../features/reviews/review.service';
 import { loadReviewerProfilesForReviews } from '../features/reviews/reviewerProfiles';
+import { createNote } from '../features/notes/notes.service';
 
 interface ReadingTreatise {
   id: string;
@@ -137,8 +138,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
     onError: () => onShowToast?.('Could not save reading progress'),
   });
 
-  // Contemplation state (customizable via reading logger)
-
   const handleOpenBookDetail = (item: { id: string; title: string }) => {
     if (onSelectBook) {
       onSelectBook(item.id);
@@ -147,19 +146,21 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
     }
   };
 
-  // Reading Logger Modal State ("the user can add how many pages they read and if they are on a chapter")
+  // Reading Logger Modal State
   const [isLoggerModalOpen, setIsLoggerModalOpen] = useState(false);
   const [loggerBook, setLoggerBook] = useState('');
   const [loggerPagesRead, setLoggerPagesRead] = useState(12);
 
-  // Write Notes Modal
+  // Write Notes Modal State
   const [activeNotesBook, setActiveNotesBook] = useState<{
+    id: string;
     title: string;
     location: string;
   } | null>(null);
+  const [newNoteTitle, setNewNoteTitle] = useState('');
   const [newNoteText, setNewNoteText] = useState('');
 
-  // Discussion Modal
+  // Discussion Modal State
   const [activeDiscussionBook, setActiveDiscussionBook] = useState<{
     id: string;
     title: string;
@@ -167,6 +168,23 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
     prompt: string;
     repliesCount: number;
   } | null>(null);
+
+  // Save note mutation (persists to Supabase via createNote)
+  const saveNoteMutation = useMutation({
+    mutationFn: (values: { bookId: string; title: string; content: string }) => {
+      if (!currentUserId) throw new Error('Not signed in');
+      return createNote(currentUserId, values.bookId, values.title, values.content);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['notes', currentUserId] });
+      onShowToast?.(`Marginal note saved for ${activeNotesBook?.title ?? 'book'}`);
+      onUpdateUser?.({ notesCount: user.notesCount + 1 });
+      setNewNoteTitle('');
+      setNewNoteText('');
+      setActiveNotesBook(null);
+    },
+    onError: () => onShowToast?.('Could not save note'),
+  });
 
   // Handlers
   const handleSaveReadingLog = (e: React.FormEvent) => {
@@ -183,21 +201,17 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
     setIsLoggerModalOpen(false);
   };
 
-
-
   const handleSaveNote = () => {
-    if (!newNoteText.trim()) {
-      setActiveNotesBook(null);
+    if (!activeNotesBook || !newNoteText.trim()) return;
+    if (!currentUserId) {
+      onShowToast?.('Sign in to save notes');
       return;
     }
-    if (onShowToast) {
-      onShowToast(`Marginal note saved for ${activeNotesBook?.title}`);
-    }
-    if (onUpdateUser) {
-      onUpdateUser({ notesCount: user.notesCount + 1 });
-    }
-    setNewNoteText('');
-    setActiveNotesBook(null);
+    saveNoteMutation.mutate({
+      bookId: activeNotesBook.id,
+      title: newNoteTitle,
+      content: newNoteText,
+    });
   };
 
   return (
@@ -242,8 +256,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
             </div>
           </div>
         </header>
-
-
 
         {/* ========================================================================= */}
         {/* 3. CURRENTLY READING SECTION                                              */}
@@ -313,9 +325,11 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                     onClick={(e) => {
                       e.stopPropagation();
                       setActiveNotesBook({
+                        id: item.id,
                         title: item.title,
                         location: item.location
                       });
+                      setNewNoteTitle('');
                       setNewNoteText('');
                     }}
                     className="px-3 lg:px-3.5 py-1.5 lg:py-2 rounded-lg border border-theme bg-theme-surface hover:bg-theme-subtle text-theme-main text-xs lg:text-sm font-serif font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
@@ -483,7 +497,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                   </span>
                 </div>
               </div>
-
             </div>
 
             <div className="pt-2 border-t border-theme flex items-center justify-end gap-2">
@@ -502,6 +515,80 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 6. MODAL: WRITE NOTES (was missing)                                       */}
+      {/* ========================================================================= */}
+      {activeNotesBook && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setActiveNotesBook(null)}
+        >
+          <div
+            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-theme pb-3">
+              <div>
+                <span className="text-[10px] font-sans uppercase tracking-[0.25em] text-theme-muted block">
+                  MARGINAL NOTE
+                </span>
+                <h3 className="font-serif font-bold text-base text-theme-main mt-0.5">
+                  {activeNotesBook.title}
+                </h3>
+                <p className="text-xs text-theme-muted font-serif italic">
+                  {activeNotesBook.location}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveNotesBook(null)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
+                aria-label="Close dialog"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            <input
+              type="text"
+              value={newNoteTitle}
+              onChange={(e) => setNewNoteTitle(e.target.value)}
+              placeholder="Title (optional)"
+              className="w-full bg-theme-app border border-theme rounded-lg p-2.5 text-sm font-serif text-theme-main focus:outline-none focus:border-theme-accent"
+            />
+
+            <textarea
+              autoFocus
+              value={newNoteText}
+              onChange={(e) => setNewNoteText(e.target.value)}
+              rows={6}
+              placeholder="Write your reflection or marginal note..."
+              className="w-full bg-theme-app border border-theme rounded-lg p-3 text-sm font-serif text-theme-main focus:outline-none focus:border-theme-accent resize-none"
+            />
+
+            <div className="pt-2 border-t border-theme flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveNotesBook(null)}
+                className="px-4 py-2 text-xs font-serif text-theme-muted hover:text-theme-main cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveNote}
+                disabled={!newNoteText.trim() || saveNoteMutation.isPending}
+                className="px-4 py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 text-xs font-serif tracking-wide hover:bg-stone-700 dark:hover:bg-stone-600 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {saveNoteMutation.isPending ? 'Saving...' : 'Save Note'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -580,7 +667,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
           </div>
         </div>
       )}
-
     </div>
   );
 };
