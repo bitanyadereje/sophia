@@ -13,6 +13,7 @@ import { ReviewsView, createReview, deleteReview, loadReviews, mapReviewMutation
 import { loadProfile, ProfileView, updateProfile, uploadAvatar } from './features/profile';
 import { SavedView } from './features/saved';
 import { NotesView } from './features/notes/components/NotesView';
+import { loadNotes } from './features/notes/notes.service';
 import { supabase } from './lib/supabase';
 
 // ============================================================
@@ -249,6 +250,7 @@ export const App: React.FC = () => {
         book_id: bookId,
         title: data.reviewTitle ?? data.title ?? null,
         content: data.content, rating: data.rating, quote: data.quote || null,
+        status: data.status ?? 'published',
       });
       
       setReviews((previous) => [newReview, ...previous]);
@@ -431,6 +433,23 @@ export const App: React.FC = () => {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onShowToast={showToast}
+            loadMarginalia={async (bookId) => {
+              if (!authUserId || !bookId) return [];
+              try {
+                const notes = await loadNotes(authUserId, bookId);
+                return notes
+                  .filter((note) => note.content?.trim())
+                  .map((note) => ({
+                    id: note.id,
+                    text: note.content,
+                    quote: note.content,
+                    citation: note.title || undefined,
+                  }));
+              } catch (error) {
+                console.error('Failed to load marginalia for review composer:', error);
+                return [];
+              }
+            }}
           />
         )}
 
