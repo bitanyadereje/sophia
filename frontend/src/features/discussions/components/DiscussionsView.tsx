@@ -1110,15 +1110,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => handleOpenThread(q.id)}
-                          className="text-[11px] font-label-md text-theme-accent hover:underline flex items-center gap-0.5 cursor-pointer font-semibold"
-                        >
-                          <span>{isAmharic ? 'ውይይቱን ክፈት' : 'Open Thread'}</span>
-                          <span className="material-symbols-outlined text-[13px]">arrow_forward</span>
-                        </button>
-
-                        <button
-                          type="button"
                           onClick={() => toggleSave(q.id)}
                           className={`cursor-pointer transition-colors p-1 rounded hover:bg-theme-subtle ${
                             saved ? 'text-theme-gold' : 'hover:text-theme-main'
