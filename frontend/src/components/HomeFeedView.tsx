@@ -357,17 +357,17 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                   </button>
 
                   <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setLoggerBook(item.id);
-                      setIsLoggerModalOpen(true);
-                    }}
-                    className="px-3 lg:px-3.5 py-1.5 lg:py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 text-xs lg:text-sm font-serif font-semibold hover:bg-stone-700 dark:hover:bg-stone-600 inline-flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ml-auto"
-                  >
-                    <span className="material-symbols-outlined text-[15px] lg:text-[17px]">menu_book</span>
-                    <span>Log Reading</span>
-                  </button>
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLoggerBook(item.id);
+                    setIsLoggerModalOpen(true);
+                  }}
+                  className="px-3 lg:px-3.5 py-1.5 lg:py-2 rounded-lg border border-theme-accent/30 bg-theme-accent-light text-theme-accent hover:bg-theme-accent/15 text-xs lg:text-sm font-serif font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs ml-auto"
+                >
+                  <span className="material-symbols-outlined text-[15px] lg:text-[17px]">menu_book</span>
+                  <span>Log Reading</span>
+                </button>
                 </div>
               </article>
             ))}

@@ -138,6 +138,7 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
         content: revBody.trim(),
         rating: revRating,
         quote: revQuote.trim() || null,
+        status: 'published',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };

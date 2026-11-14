@@ -14,7 +14,10 @@ export const mapReviewMutationError = (error: any): string => {
   return error?.message || 'Unexpected database error.';
 };
 
-export const createReview = async (userId: string, review: Pick<Review, 'book_id' | 'content' | 'rating' | 'quote'> & { title?: string | null }) => {
+export const createReview = async (
+  userId: string,
+  review: Pick<Review, 'book_id' | 'content' | 'rating' | 'quote' | 'status'> & { title?: string | null },
+) => {
   const { data, error } = await supabase.from('reviews').insert({ user_id: userId, ...review }).select('*').single();
   if (error) throw error;
   return data as Review;
@@ -26,6 +29,7 @@ export const updateReview = async (id: string, userId: string, updated: Partial<
     ...(updated.content !== undefined ? { content: updated.content } : {}),
     ...(updated.rating !== undefined ? { rating: updated.rating } : {}),
     ...(updated.quote !== undefined ? { quote: updated.quote } : {}),
+    ...(updated.status !== undefined ? { status: updated.status } : {}),
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await supabase.from('reviews').update(patch).eq('id', id).eq('user_id', userId).select('*').single();
