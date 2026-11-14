@@ -100,6 +100,7 @@ export interface Review {
   content: string;
   rating: number;
   quote: string | null;
+  status: 'draft' | 'published';
   created_at: string;
   updated_at: string;
 }
