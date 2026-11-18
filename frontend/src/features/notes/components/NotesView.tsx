@@ -180,7 +180,12 @@ export const NotesView: React.FC<NotesViewProps> = ({
 
   return (
     <section className={`space-y-6 ${compact ? '' : 'mx-auto w-full max-w-4xl px-4 py-8'}`}>
-      {!compact && <h1 className="font-serif text-2xl font-semibold text-theme-main">Notes</h1>}
+      {!compact && (
+        <div>
+          <h1 className="font-serif text-2xl font-semibold text-theme-main">Notes</h1>
+          <p className="page-subtitle text-theme-muted">Capture reflections, quotations, and questions as you read.</p>
+        </div>
+      )}
 
       {/* Top Toolbar: Pill Search + Primary Gold CTA */}
       <div className="space-y-4">

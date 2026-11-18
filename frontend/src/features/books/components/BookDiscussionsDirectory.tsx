@@ -80,7 +80,7 @@ export const BookDiscussionsDirectory: React.FC<BookDiscussionsDirectoryProps> =
             <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main">
               {isAmharic ? 'የመጽሐፍ ውይይቶች' : 'Book Discussions'}
             </h1>
-            <p className="text-xs sm:text-sm text-theme-muted mt-1 max-w-2xl leading-relaxed">
+            <p className="page-subtitle text-xs sm:text-sm text-theme-muted mt-1 max-w-2xl leading-relaxed">
               {isAmharic
                 ? 'የጥራዝ ሴሚናር ክፍል ለመግባት እና ከምሁራን ጋር ለመወያየት ማንኛውንም መጽሐፍ ይምረጡ።'
                 : 'Select any volume to step into its dedicated text seminar and join the discussion with fellow readers.'}
