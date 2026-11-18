@@ -1920,7 +1920,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
             <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main">
               {isAmharic ? 'የአንባቢዎች መጽሐፍ ዳሰሳዎች' : 'Reader Reviews & Reflections'}
             </h1>
-            <p className="text-xs sm:text-sm text-theme-muted">
+            <p className="page-subtitle text-xs sm:text-sm text-theme-muted">
               {isAmharic ? 'የማህበረሰብ መጽሐፍ ዳሰሳዎች' : 'Community book reviews and reflections'}
             </p>
           </div>
