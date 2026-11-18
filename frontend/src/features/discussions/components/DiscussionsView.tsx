@@ -936,7 +936,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main">
                   {isAmharic ? 'የማህበረሰብ ውይይቶች' : 'Community Discussions'}
                 </h1>
-                <p className="text-xs sm:text-sm text-theme-muted font-sans">
+                <p className="page-subtitle text-xs sm:text-sm text-theme-muted font-sans">
                   {isAmharic
                     ? 'ጥልቅ የውይይት ርዕሶች፣ የጽሑፍ ጥያቄዎች እና ምሁራዊ ውይይቶች'
                     : 'Deep-dive dialectical threads, textual inquiries, and scholarly discourse'}

@@ -62,7 +62,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
               <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main">
                 {t('saved.title', 'Saved Archive')}
               </h1>
-              <p className="text-xs sm:text-sm text-theme-muted font-serif italic mt-0.5">
+              <p className="page-subtitle text-xs sm:text-sm text-theme-muted font-serif italic mt-0.5">
                 {t('saved.subtitle', 'Your private bookmarks, book citations, and reading notes')}
               </p>
             </div>

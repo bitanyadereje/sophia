@@ -15,6 +15,7 @@ import { SavedView } from './features/saved';
 import { NotesView } from './features/notes/components/NotesView';
 import { loadNotes } from './features/notes/notes.service';
 import { supabase } from './lib/supabase';
+import { AdminDashboard } from './features/admin';
 
 // ============================================================
 // Temporary empty defaults
@@ -40,6 +41,7 @@ export const App: React.FC = () => {
   const queryClient = useQueryClient();
   // --- GLOBAL STATE (Routing, Auth, Theme) ---
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('home');
+  const [isAdminRoute, setIsAdminRoute] = useState(() => window.location.pathname === '/admin');
   const [user, setUser] = useState<UserProfile>(INITIAL_USER);
   const [theme, setTheme] = useState<ThemeMode>(INITIAL_USER.themePreference || 'dark');
   const [authUserId, setAuthUserId] = useState<string | null>(null);
@@ -119,6 +121,20 @@ export const App: React.FC = () => {
       subscription.unsubscribe();
     };
   }, []);
+
+  // The application otherwise uses lightweight screen state instead of a router.
+  // Keep /admin a real, bookmarkable browser route without adding a routing library.
+  useEffect(() => {
+    const onPopState = () => setIsAdminRoute(window.location.pathname === '/admin');
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const leaveAdmin = () => {
+    window.history.pushState({}, '', '/');
+    setIsAdminRoute(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // --- THEME ---
   useEffect(() => {
@@ -293,7 +309,7 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      <Header
+      {!isAdminRoute && <Header
         currentScreen={currentScreen}
         onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
         user={user}
@@ -302,10 +318,13 @@ export const App: React.FC = () => {
         onSignOut={handleSignOut}
         theme={theme}
         onSetTheme={handleSetTheme}
-      />
+      />}
 
-      <main className="flex-1 flex flex-col">
+      <main className={`flex-1 flex flex-col ${currentScreen === 'home' ? '' : 'page-typography'}`}>
         
+        {isAdminRoute ? (
+          <AdminDashboard userId={authUserId} profile={user} onExit={leaveAdmin} onShowToast={showToast} />
+        ) : <>
         {currentScreen === 'home' && (
           <HomeFeedView
             user={user}
@@ -494,27 +513,28 @@ export const App: React.FC = () => {
             onSetTheme={handleSetTheme}
           />
         )}
+        </>}
       </main>
 
-      <BottomNav
+      {!isAdminRoute && <BottomNav
         currentScreen={currentScreen}
         onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
         theme={theme}
-      />
+      />}
 
-      <SearchModal
+      {!isAdminRoute && <SearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
         books={books} questions={questions} authUserId={authUserId}
         onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-      />
+      />}
 
-      <AuthModal
+      {!isAdminRoute && <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onAuthenticated={handleAuthenticated}
         onShowToast={showToast}
-      />
+      />}
     </div>
   );
 };

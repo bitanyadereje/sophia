@@ -2,10 +2,15 @@ import { supabase } from '../../lib/supabase';
 import { Book, Difficulty, ReadingPath, ReadingPathBook } from '../../types';
 
 export type ReadingPathBookWithDetails = ReadingPathBook & {
-  book: Pick<Book, 'id' | 'title' | 'cover_url' | 'author_name'>
-    | Pick<Book, 'id' | 'title' | 'cover_url' | 'author_name'>[]
+  book: Pick<Book, 'id' | 'title' | 'cover_url' | 'author_name' | 'page_count'>
+    | Pick<Book, 'id' | 'title' | 'cover_url' | 'author_name' | 'page_count'>[]
     | null;
 };
+
+export interface NewPathStopInput {
+  bookId: string;
+  note?: string | null;
+}
 
 export const loadReadingPaths = async (): Promise<ReadingPath[]> => {
   const { data, error } = await supabase
@@ -17,29 +22,20 @@ export const loadReadingPaths = async (): Promise<ReadingPath[]> => {
   return (data ?? []) as ReadingPath[];
 };
 
-export const loadPendingPaths = async (): Promise<ReadingPath[]> => {
+export const loadMyReadingPaths = async (userId: string): Promise<ReadingPath[]> => {
   const { data, error } = await supabase
     .from('reading_paths')
     .select('*')
-    .eq('status', 'pending')
-    .order('created_at', { ascending: true });
+    .eq('creator_id', userId)
+    .order('updated_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as ReadingPath[];
-};
-
-export const approvePath = async (pathId: string, adminId: string): Promise<void> => {
-  const { error } = await supabase
-    .from('reading_paths')
-    .update({ status: 'approved', reviewed_by: adminId, reviewed_at: new Date().toISOString() })
-    .eq('id', pathId)
-    .eq('status', 'pending');
-  if (error) throw error;
 };
 
 export const loadReadingPathBooks = async (pathId: string): Promise<ReadingPathBookWithDetails[]> => {
   const { data, error } = await supabase
     .from('reading_path_books')
-    .select('reading_path_id, book_id, position, note, book:books(id, title, cover_url, author_name)')
+    .select('reading_path_id, book_id, position, note, book:books(id, title, cover_url, author_name, page_count)')
     .eq('reading_path_id', pathId)
     .order('position', { ascending: true });
   if (error) throw error;
@@ -62,16 +58,54 @@ export const createReadingPath = async (
   return data as ReadingPath;
 };
 
-export const addBooksToPath = async (pathId: string, bookIds: string[]): Promise<void> => {
-  if (bookIds.length === 0) return;
+export const addBooksToPath = async (pathId: string, stops: NewPathStopInput[]): Promise<void> => {
+  if (stops.length === 0) return;
 
   const { error } = await supabase.from('reading_path_books').insert(
-    bookIds.map((bookId, index) => ({
+    stops.map((stop, index) => ({
       reading_path_id: pathId,
-      book_id: bookId,
+      book_id: stop.bookId,
       position: index + 1,
-      note: null,
+      note: stop.note?.trim() || null,
     })),
   );
+  if (error) throw error;
+};
+
+export const updateReadingPath = async (
+  pathId: string,
+  input: Pick<ReadingPath, 'title' | 'description' | 'topic' | 'difficulty'>,
+  stops: NewPathStopInput[],
+): Promise<ReadingPath> => {
+  const { data, error } = await supabase
+    .from('reading_paths')
+    .update({
+      title: input.title.trim(),
+      description: input.description?.trim() || null,
+      topic: input.topic.trim(),
+      difficulty: input.difficulty,
+      // A corrected rejected submission returns to the moderation queue.
+      status: 'pending',
+      reviewed_by: null,
+      reviewed_at: null,
+      rejection_note: null,
+    })
+    .eq('id', pathId)
+    .select('*')
+    .single();
+  if (error) throw error;
+
+  const { error: removeError } = await supabase
+    .from('reading_path_books')
+    .delete()
+    .eq('reading_path_id', pathId);
+  if (removeError) throw removeError;
+
+  await addBooksToPath(pathId, stops);
+  return data as ReadingPath;
+};
+
+export const deleteReadingPath = async (pathId: string): Promise<void> => {
+  const { error } = await supabase.from('reading_paths').delete().eq('id', pathId);
   if (error) throw error;
 };

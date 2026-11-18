@@ -153,6 +153,7 @@ export interface ReadingPath {
   status: PathStatus;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  rejection_note?: string | null;
   created_at: string;
   updated_at: string;
 }
