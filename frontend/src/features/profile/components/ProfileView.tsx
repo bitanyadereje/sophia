@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { UserProfile, ScreenId, ThemeMode } from '../../../types';
 import { THEMES_LIST } from '../../../data/themes';
-import { Check } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { useLanguage } from '../../../context/LanguageContext';
+import { supabase } from '../../../lib/supabase';
 
 interface ProfileViewProps {
   user: UserProfile;
@@ -16,12 +18,21 @@ interface ProfileViewProps {
   onSetTheme: (theme: ThemeMode) => void;
 }
 
+interface ArchiveEntry {
+  key: string;
+  kind: 'review' | 'discussion' | 'path';
+  id: string;
+  badge: string;
+  title: string;
+  meta: string;
+  createdAt: string;
+}
+
 export const ProfileView: React.FC<ProfileViewProps> = ({
   user,
   onUpdateUser,
   onAvatarUpload,
   onNavigate,
-  onOpenAuth,
   onSignOut,
   onShowToast,
   theme,
@@ -33,57 +44,263 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editTitle, setEditTitle] = useState(user.title);
   const [editLocation, setEditLocation] = useState(user.location);
 
-  // Preference toggles
-  const [quietHoursEnabled, setQuietHoursEnabled] = useState(true);
-  const [isCloistered, setIsCloistered] = useState(false);
-  const [fontSizePref, setFontSizePref] = useState<'Standard' | 'Compact' | 'Magnified'>('Standard');
+  // Collapsible Intellectual Archive
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
+  const [showAllArchive, setShowAllArchive] = useState(false);
 
-  // New interest
-  const [newTopicInput, setNewTopicInput] = useState('');
-  const [isAddingTopic, setIsAddingTopic] = useState(false);
+  // Active Security Drawer ('email' | 'password' | null)
+  const [activeSecurityDrawer, setActiveSecurityDrawer] = useState<'email' | 'password' | null>(null);
+  const [newEmail, setNewEmail] = useState('');
+  const [isUpdatingEmail, setIsUpdatingEmail] = useState(false);
 
-  // Adjust goal modal
-  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
-  const [tempGoal, setTempGoal] = useState(user.goalTarget);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
-  const goalPercentage = Math.min(100, Math.round((user.booksRead / user.goalTarget) * 100));
+  // Delete Account Modal
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  // Export state
+  const [isExportingNotes, setIsExportingNotes] = useState(false);
+
+  // Fetch auth user email + derived scholarly contributions from existing tables
+  const { data: contributionData, isPending: isStatsPending } = useQuery({
+    queryKey: ['profile-contributions', user.id],
+    enabled: Boolean(user.id),
+    queryFn: async () => {
+      const [
+        authRes,
+        completedRes,
+        reviewsRes,
+        discussionsRes,
+        pathsRes,
+        notesCountRes,
+      ] = await Promise.all([
+        supabase.auth.getUser(),
+        supabase
+          .from('library_books')
+          .select('book_id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('status', 'completed'),
+        supabase
+          .from('reviews')
+          .select('id, title, content, rating, status, created_at, book:books(title)')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('discussion_posts')
+          .select('id, content, parent_id, reply_count, created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('reading_paths')
+          .select('id, title, status, created_at')
+          .eq('creator_id', user.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('notes')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id),
+      ]);
+
+      const reviews = reviewsRes.data ?? [];
+      const discussions = discussionsRes.data ?? [];
+      const paths = pathsRes.data ?? [];
+
+      const publishedReviewsCount = reviews.filter((r: any) => r.status === 'published' || !r.status).length;
+
+      return {
+        email: authRes.data?.user?.email ?? '',
+        booksCompleted: completedRes.count ?? 0,
+        reviewsPublished: publishedReviewsCount,
+        discussionsCount: discussions.length,
+        pathsCurated: paths.length,
+        privateNotesCount: notesCountRes.count ?? 0,
+        reviews,
+        discussions,
+        paths,
+      };
+    },
+  });
+
+  // Build unified chronological archive list
+  const archiveEntries = useMemo<ArchiveEntry[]>(() => {
+    if (!contributionData) return [];
+    const entries: ArchiveEntry[] = [];
+
+    contributionData.reviews.forEach((rev: any) => {
+      const bookTitle = Array.isArray(rev.book) ? rev.book[0]?.title : rev.book?.title;
+      entries.push({
+        key: `review-${rev.id}`,
+        kind: 'review',
+        id: rev.id,
+        badge: rev.status === 'draft' ? 'Review Draft' : `Review · ★ ${rev.rating}/5`,
+        title: rev.title || (bookTitle ? `Review: ${bookTitle}` : rev.content),
+        meta: bookTitle ? `${bookTitle} · ${new Date(rev.created_at).toLocaleDateString()}` : new Date(rev.created_at).toLocaleDateString(),
+        createdAt: rev.created_at,
+      });
+    });
+
+    contributionData.discussions.forEach((post: any) => {
+      const isReply = Boolean(post.parent_id);
+      entries.push({
+        key: `discussion-${post.id}`,
+        kind: 'discussion',
+        id: post.parent_id || post.id,
+        badge: isReply ? 'Reply' : 'Discussion',
+        title: post.content,
+        meta: `${post.reply_count ?? 0} ${post.reply_count === 1 ? 'reply' : 'replies'} · ${new Date(post.created_at).toLocaleDateString()}`,
+        createdAt: post.created_at,
+      });
+    });
+
+    contributionData.paths.forEach((path: any) => {
+      entries.push({
+        key: `path-${path.id}`,
+        kind: 'path',
+        id: path.id,
+        badge: `Path · ${path.status || 'Published'}`,
+        title: path.title,
+        meta: new Date(path.created_at).toLocaleDateString(),
+        createdAt: path.created_at,
+      });
+    });
+
+    return entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [contributionData]);
+
+  const visibleArchiveEntries = showAllArchive ? archiveEntries : archiveEntries.slice(0, 3);
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateUser({
       name: editName,
       title: editTitle,
-      location: editLocation
+      location: editLocation,
     });
     setIsEditProfileOpen(false);
-    onShowToast('Profile updated');
+    onShowToast(isAmharic ? 'መገለጫ ተዘምኗል' : 'Profile updated');
   };
 
-  const handleAddTopic = () => {
-    if (!newTopicInput.trim()) return;
-    if (!user.topics.includes(newTopicInput.trim())) {
-      onUpdateUser({ topics: [...user.topics, newTopicInput.trim()] });
-      onShowToast(`Added "${newTopicInput.trim()}" to reading topics`);
+  const handleExportMarkdown = async () => {
+    if (!user.id || isExportingNotes) return;
+    setIsExportingNotes(true);
+    try {
+      const { data, error } = await supabase
+        .from('notes')
+        .select('id, title, content, created_at, book:books(title, author_name)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        onShowToast(isAmharic ? 'ምንም የግል ማስታወሻ አልተገኘም' : 'No private notes to export yet');
+        return;
+      }
+
+      const lines = [
+        `# Sophia Marginalia & Reading Notes`,
+        `Reader: ${user.name || 'Scholar'}`,
+        `Exported: ${new Date().toLocaleDateString()}`,
+        ``,
+        ...data.map((note: any) => {
+          const bookObj = Array.isArray(note.book) ? note.book[0] : note.book;
+          const heading = note.title || bookObj?.title || 'Untitled Note';
+          const sub = bookObj?.title ? `*${bookObj.title}${bookObj.author_name ? ` — ${bookObj.author_name}` : ''}* · ` : '';
+          return `## ${heading}\n${sub}${new Date(note.created_at).toLocaleDateString()}\n\n${note.content}\n\n---`;
+        }),
+      ];
+
+      const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sophia-marginalia-${new Date().toISOString().slice(0, 10)}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      onShowToast(isAmharic ? 'ማስታወሻዎች በማርክዳውን ወርደዋል' : 'Marginalia exported as Markdown');
+    } catch (err) {
+      console.error('Export failed:', err);
+      onShowToast(isAmharic ? 'ማስታወሻዎችን ማውረድ አልተቻለም' : 'Could not export notes');
+    } finally {
+      setIsExportingNotes(false);
     }
-    setNewTopicInput('');
-    setIsAddingTopic(false);
   };
 
-  const handleSaveGoal = () => {
-    onUpdateUser({ goalTarget: tempGoal });
-    setIsGoalModalOpen(false);
-    onShowToast(`2025 reading goal updated to ${tempGoal} books`);
+  const handleUpdateEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newEmail.trim()) return;
+    setIsUpdatingEmail(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ email: newEmail.trim() });
+      if (error) throw error;
+      onShowToast(isAmharic ? 'የማረጋገጫ ኢሜይል ተልኳል' : 'Confirmation sent to your new email address');
+      setNewEmail('');
+      setActiveSecurityDrawer(null);
+    } catch (err: any) {
+      onShowToast(err?.message || 'Could not update email');
+    } finally {
+      setIsUpdatingEmail(false);
+    }
   };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 8) {
+      onShowToast(isAmharic ? 'የይለፍ ቃል ቢያንስ 8 ፊደላት መሆን አለበት' : 'Password must be at least 8 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      onShowToast(isAmharic ? 'የይለፍ ቃሎቹ አይመሳሰሉም' : 'Passwords do not match');
+      return;
+    }
+    setIsUpdatingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      onShowToast(isAmharic ? 'የይለፍ ቃል ተቀይሯል' : 'Password updated');
+      setNewPassword('');
+      setConfirmPassword('');
+      setActiveSecurityDrawer(null);
+    } catch (err: any) {
+      onShowToast(err?.message || 'Could not update password');
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
+
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (deleteConfirmText !== 'DELETE' || isDeletingAccount) return;
+    setIsDeletingAccount(true);
+    try {
+      const { error } = await supabase.rpc('delete_own_account');
+      if (error) throw error;
+      setIsDeleteModalOpen(false);
+      onShowToast(isAmharic ? 'መለያዎ ተሰርዟል' : 'Your account has been permanently deleted');
+      await onSignOut?.();
+    } catch (err: any) {
+      console.error('Account deletion failed:', err);
+      onShowToast(err?.message || 'Account deletion RPC not configured yet');
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const subtitleParts = [
+    user.location?.trim(),
+    user.memberSince?.trim() ? `${isAmharic ? 'የተቀላቀሉት' : 'Joined'} ${user.memberSince.trim()}` : '',
+  ].filter(Boolean);
 
   return (
     <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
       <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6">
-        {/* Scholar Header Card */}
+        {/* Scholar Header Card — Preserved */}
         <article className="bg-theme-surface rounded-2xl p-5 sm:p-7 border border-theme shadow-sm flex flex-col gap-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              
-              {/* UPDATED AVATAR BLOCK WITH UPLOAD */}
               <div className="relative group">
                 {user.avatar ? (
                   <img
@@ -96,7 +313,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     {user.name?.charAt(0) || '?'}
                   </div>
                 )}
-                
+
                 {onAvatarUpload && (
                   <label className="absolute inset-0 bg-black/50 text-white rounded-full flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
                     <span className="material-symbols-outlined text-[20px]">photo_camera</span>
@@ -124,10 +341,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     verified
                   </span>
                 </div>
-                <span className="text-xs sm:text-sm text-theme-muted">{user.title}</span>
-                <span className="text-[11px] sm:text-xs text-theme-subtle mt-0.5">
-                  {user.location} · Joined {user.memberSince}
-                </span>
+                {user.title && <span className="text-xs sm:text-sm text-theme-muted">{user.title}</span>}
+                {subtitleParts.length > 0 && (
+                  <span className="text-[11px] sm:text-xs text-theme-subtle mt-0.5">
+                    {subtitleParts.join(' · ')}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -146,136 +365,144 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </button>
           </div>
 
-          {/* Tri-stat Bar */}
-          <div className="grid grid-cols-3 gap-2.5 pt-2 border-t border-theme">
+          {/* 4 Derived Scholarly Contribution Metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-3 border-t border-theme">
             <div className="bg-theme-subtle rounded-xl p-3 text-center border border-theme">
-              <span className="font-serif text-xl sm:text-2xl font-bold text-theme-main block">{user.booksRead}</span>
+              <span className="font-serif text-xl sm:text-2xl font-bold text-theme-main block">
+                {isStatsPending ? '—' : contributionData?.booksCompleted ?? 0}
+              </span>
               <span className="text-[10px] font-label-md uppercase tracking-wider text-theme-subtle">
-                {isAmharic ? 'የተነበዩ መጻሕፍት' : 'Books Read'}
+                {isAmharic ? 'የተጠናቀቁ መጻሕፍት' : 'Books Completed'}
               </span>
             </div>
             <div className="bg-theme-subtle rounded-xl p-3 text-center border border-theme">
-              <span className="font-serif text-xl sm:text-2xl font-bold text-theme-main block">{user.notesCount}</span>
+              <span className="font-serif text-xl sm:text-2xl font-bold text-theme-main block">
+                {isStatsPending ? '—' : contributionData?.reviewsPublished ?? 0}
+              </span>
               <span className="text-[10px] font-label-md uppercase tracking-wider text-theme-subtle">
-                {isAmharic ? 'ማስታወሻዎች እና ጥቅሶች' : 'Notes & Quotes'}
+                {isAmharic ? 'የታተሙ ግምገማዎች' : 'Reviews Published'}
               </span>
             </div>
             <div className="bg-theme-subtle rounded-xl p-3 text-center border border-theme">
-              <div className="flex items-center justify-center gap-0.5 text-theme-gold">
-                <span className="font-serif text-xl sm:text-2xl font-bold text-theme-main">{user.dayStreak}</span>
-                <span className="material-symbols-outlined text-[17px]">local_fire_department</span>
-              </div>
+              <span className="font-serif text-xl sm:text-2xl font-bold text-theme-main block">
+                {isStatsPending ? '—' : contributionData?.discussionsCount ?? 0}
+              </span>
               <span className="text-[10px] font-label-md uppercase tracking-wider text-theme-subtle">
-                {isAmharic ? 'የቀናት ተከታታይነት' : 'Day Streak'}
+                {isAmharic ? 'ውይይቶች እና ምላሾች' : 'Discussions & Replies'}
+              </span>
+            </div>
+            <div className="bg-theme-subtle rounded-xl p-3 text-center border border-theme">
+              <span className="font-serif text-xl sm:text-2xl font-bold text-theme-main block">
+                {isStatsPending ? '—' : contributionData?.pathsCurated ?? 0}
+              </span>
+              <span className="text-[10px] font-label-md uppercase tracking-wider text-theme-subtle">
+                {isAmharic ? 'የተዘጋጁ መንገዶች' : 'Paths Curated'}
               </span>
             </div>
           </div>
+
+          {/* Private Marginalia Footnote */}
+          <div className="flex items-center justify-between text-xs pt-1 text-theme-muted">
+            <span className="flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[15px] text-theme-subtle">lock</span>
+              <span>
+                {isAmharic
+                  ? `${contributionData?.privateNotesCount ?? 0} የግል ማስታወሻዎች (ለእርስዎ ብቻ የሚታዩ)`
+                  : `${contributionData?.privateNotesCount ?? 0} private marginalia notes (visible only to you)`}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => onNavigate('notes')}
+              className="text-theme-accent font-medium hover:underline cursor-pointer"
+            >
+              {isAmharic ? 'ማስታወሻዎችን ክፈት →' : 'Open Notes →'}
+            </button>
+          </div>
         </article>
 
-        {/* 2-Column Responsive Grid on Tablets & Desktop */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* 2025 Reading Journey Card */}
-          <section className="bg-theme-surface rounded-xl p-5 border border-theme shadow-sm flex flex-col justify-between gap-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-theme-gold text-[22px]">auto_stories</span>
-                <h2 className="font-serif text-[16px] font-bold text-theme-main">
-                  {isAmharic ? 'የ2025 የንባብ ግብ' : '2025 Reading Goal'}
-                </h2>
-              </div>
-              <button
-                onClick={() => {
-                  setTempGoal(user.goalTarget);
-                  setIsGoalModalOpen(true);
-                }}
-                className="text-xs text-theme-accent font-semibold hover:underline cursor-pointer"
-              >
-                {isAmharic ? 'ግብ አስተካክል' : 'Adjust Goal'}
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-theme-muted font-medium">
-                  {isAmharic ? `${user.booksRead} ከ ${user.goalTarget} መጻሕፍት ተነበዩ` : `${user.booksRead} of ${user.goalTarget} Books Read`}
-                </span>
-                <span className="font-bold text-theme-main">
-                  {goalPercentage}% {isAmharic ? 'ተጠናቋል' : 'Complete'}
-                </span>
-              </div>
-              <div className="h-2 w-full bg-theme-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-theme-accent rounded-full transition-all duration-500"
-                  style={{ width: `${goalPercentage}%` }}
-                ></div>
-              </div>
-            </div>
-            <p className="text-xs text-theme-subtle leading-relaxed">
-              {isAmharic ? 'ዓመታዊ የንባብ ዕቅድዎን ለማጠናቀቅ በትክክለኛው መንገድ ላይ ነዎት።' : 'On track to complete your annual reading plan.'}
-            </p>
-          </section>
-
-          {/* Scholarly Interests & Focus */}
-          <section className="bg-theme-surface rounded-xl p-5 border border-theme shadow-sm flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between">
+        {/* Collapsible Unified Intellectual Archive */}
+        <section className="bg-theme-surface rounded-xl border border-theme shadow-sm overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setIsArchiveOpen((prev) => !prev)}
+            aria-expanded={isArchiveOpen}
+            className="w-full p-5 sm:px-6 flex items-center justify-between text-left hover:bg-theme-subtle/50 transition-colors cursor-pointer"
+          >
+            <div>
               <h2 className="font-serif text-[16px] font-bold text-theme-main">
-                {isAmharic ? 'የንባብ ርዕሶች እና ፍላጎቶች' : 'Reading Topics & Interests'}
+                {isAmharic ? 'የምሁራዊ አስተዋጽኦ መዝገብ' : 'Intellectual Archive'}
               </h2>
-              <span className="text-[11px] font-label-md text-theme-subtle uppercase">
-                {user.topics.length} {isAmharic ? 'ርዕሶች' : 'Topics'}
-              </span>
+              <p className="text-xs text-theme-subtle mt-0.5">
+                {isAmharic
+                  ? `${archiveEntries.length} የታተሙ ግምገማዎች፣ ውይይቶች እና የንባብ መንገዶች`
+                  : `${archiveEntries.length} recorded reviews, discussions & curated paths`}
+              </p>
             </div>
+            <div className="flex items-center gap-2 text-theme-muted">
+              <span className="text-xs font-medium hidden sm:inline">
+                {isArchiveOpen ? (isAmharic ? 'ደብቅ' : 'Collapse') : (isAmharic ? 'ክፈት' : 'Expand')}
+              </span>
+              {isArchiveOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            </div>
+          </button>
 
-            <div className="flex flex-wrap gap-1.5 my-auto">
-              {user.topics.map((t) => (
-                <span
-                  key={t}
-                  className="text-xs font-medium px-3.5 py-1.5 rounded-full bg-theme-subtle text-theme-body border border-theme flex items-center"
-                >
-                  {t}
-                </span>
-              ))}
-
-              {isAddingTopic ? (
-                <div className="flex items-center gap-1">
-                  <input
-                    type="text"
-                    value={newTopicInput}
-                    onChange={(e) => setNewTopicInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddTopic()}
-                    placeholder={isAmharic ? 'ለምሳሌ፡ ፍልስፍና' : 'e.g. Classical Philosophy'}
-                    className="text-xs bg-theme-subtle border border-theme-accent rounded-full px-3 py-1 text-theme-main focus:outline-none w-36"
-                    autoFocus
-                  />
-                  <button
-                    onClick={handleAddTopic}
-                    className="w-6 h-6 rounded-full bg-theme-accent text-white flex items-center justify-center cursor-pointer"
-                    title={isAmharic ? 'ርዕስ ጨምር' : 'Add topic'}
-                  >
-                    <span className="material-symbols-outlined text-[14px]">check</span>
-                  </button>
-                  <button
-                    onClick={() => setIsAddingTopic(false)}
-                    className="w-6 h-6 rounded-full bg-theme-subtle text-theme-muted hover:text-theme-main flex items-center justify-center cursor-pointer"
-                    title={isAmharic ? 'ሰርዝ' : 'Cancel'}
-                  >
-                    <span className="material-symbols-outlined text-[14px]">close</span>
-                  </button>
-                </div>
+          {isArchiveOpen && (
+            <div className="px-5 sm:px-6 pb-5 pt-2 border-t border-theme flex flex-col divide-y divide-theme">
+              {archiveEntries.length === 0 ? (
+                <p className="py-6 text-center text-xs text-theme-subtle">
+                  {isAmharic
+                    ? 'ገና ምንም የታተመ ግምገማ፣ ውይይት ወይም መንገድ የለም።'
+                    : 'No published reviews, discussions, or curated paths yet.'}
+                </p>
               ) : (
-                <button
-                  onClick={() => setIsAddingTopic(true)}
-                  className="text-xs font-medium px-3 py-1.5 rounded-full border border-dashed border-theme text-theme-muted hover:border-theme-accent hover:text-theme-main cursor-pointer flex items-center gap-1 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[14px]">add</span>
-                  <span>{isAmharic ? 'ርዕስ ጨምር' : 'Add Topic'}</span>
-                </button>
+                <>
+                  {visibleArchiveEntries.map((entry) => (
+                    <button
+                      key={entry.key}
+                      type="button"
+                      onClick={() => {
+                        if (entry.kind === 'review') onNavigate('reviews');
+                        else if (entry.kind === 'discussion') onNavigate('discussions');
+                        else onNavigate('paths');
+                      }}
+                      className="py-3.5 flex items-center justify-between gap-4 text-left hover:bg-theme-subtle/40 -mx-2 px-2 rounded-lg transition-colors cursor-pointer group"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-sans font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-theme-subtle text-theme-muted border border-theme">
+                            {entry.badge}
+                          </span>
+                          <span className="text-[11px] text-theme-subtle truncate">{entry.meta}</span>
+                        </div>
+                        <p className="font-serif text-sm font-medium text-theme-main group-hover:text-theme-accent line-clamp-1">
+                          {entry.title}
+                        </p>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-theme-subtle group-hover:text-theme-main shrink-0" />
+                    </button>
+                  ))}
+
+                  {archiveEntries.length > 3 && (
+                    <div className="pt-3 flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => setShowAllArchive((prev) => !prev)}
+                        className="text-xs font-medium text-theme-accent hover:underline cursor-pointer"
+                      >
+                        {showAllArchive
+                          ? (isAmharic ? 'ያነሰ አሳይ' : 'Show fewer')
+                          : (isAmharic ? `ሁሉንም ${archiveEntries.length} አሳይ` : `Show all ${archiveEntries.length} entries`)}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
-          </section>
-        </div>
+          )}
+        </section>
 
-        {/* Settings */}
+        {/* Settings & Appearance */}
         <section className="bg-theme-surface rounded-xl p-5 sm:p-6 border border-theme shadow-sm flex flex-col gap-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-theme gap-2">
             <div>
@@ -291,7 +518,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </span>
           </div>
 
-          {/* Complete 7-Theme Grid Selector */}
+          {/* Complete Manuscript Themes Grid Selector */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-theme-muted flex items-center gap-1.5">
@@ -405,8 +632,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             );
           })()}
 
-          {/* Reading Preferences */}
-          <div className="flex items-center justify-between py-2.5 border-b border-theme">
+          {/* Interface Language */}
+          <div className="flex items-center justify-between py-2.5 border-t border-theme">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-theme-subtle text-[20px]">translate</span>
               <div>
@@ -449,110 +676,189 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </button>
             </div>
           </div>
+        </section>
 
-          <div className="flex items-center justify-between py-2.5 border-b border-theme">
-            <div className="flex items-center gap-3">
-              <span className="material-symbols-outlined text-theme-subtle text-[20px]">format_size</span>
-              <div>
-                <span className="text-xs font-semibold text-theme-main block">{isAmharic ? 'የፊደል መጠን' : 'Reader Font Size'}</span>
-                <span className="text-[11px] text-theme-subtle">EB Garamond · {fontSizePref}</span>
-              </div>
+        {/* Account & Security — Clean Clickable Chevron Rows (No Boxed Row Buttons) */}
+        <section className="bg-theme-surface rounded-xl p-5 sm:p-6 border border-theme shadow-sm flex flex-col">
+          <div className="pb-3 border-b border-theme">
+            <h2 className="font-serif text-[16px] font-bold text-theme-main">
+              {isAmharic ? 'መለያ እና ደህንነት' : 'Account & Security'}
+            </h2>
+            <p className="text-xs text-theme-subtle mt-0.5">
+              {isAmharic ? 'የመግቢያ መረጃዎን ያስተዳድሩ እና የግል ማስታወሻዎችዎን ያውርዱ' : 'Manage your credentials and export your personal marginalia'}
+            </p>
+          </div>
+
+          <div className="divide-y divide-theme">
+            {/* Email Address Row */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setActiveSecurityDrawer((prev) => (prev === 'email' ? null : 'email'))}
+                className="w-full py-3.5 flex items-center justify-between gap-4 text-left hover:bg-theme-subtle/50 -mx-2 px-2 rounded-lg transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="material-symbols-outlined text-theme-subtle text-[20px]">mail</span>
+                  <div className="min-w-0">
+                    <span className="text-xs font-semibold text-theme-main block">
+                      {isAmharic ? 'የኢሜይል አድራሻ' : 'Email Address'}
+                    </span>
+                    <span className="text-[11px] text-theme-subtle truncate block">
+                      {contributionData?.email || (isAmharic ? 'በመጫን ላይ...' : 'Loading account email...')}
+                    </span>
+                  </div>
+                </div>
+                <ChevronRight
+                  className={`w-4 h-4 text-theme-subtle transition-transform shrink-0 ${
+                    activeSecurityDrawer === 'email' ? 'rotate-90 text-theme-main' : ''
+                  }`}
+                />
+              </button>
+
+              {activeSecurityDrawer === 'email' && (
+                <form onSubmit={handleUpdateEmail} className="pb-4 pt-1 pl-8 pr-2 flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="email"
+                    required
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder={isAmharic ? 'አዲስ ኢሜይል ያስገቡ' : 'Enter new email address'}
+                    className="flex-1 bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveSecurityDrawer(null)}
+                      className="px-3 py-2 text-xs text-theme-muted hover:text-theme-main cursor-pointer"
+                    >
+                      {t('common.cancel', 'Cancel')}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isUpdatingEmail || !newEmail.trim()}
+                      className="px-3.5 py-2 rounded-lg bg-theme-main text-theme-surface text-xs font-semibold cursor-pointer disabled:opacity-50"
+                    >
+                      {isUpdatingEmail ? 'Sending...' : (isAmharic ? 'ኢሜይል ቀይር' : 'Update Email')}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
+
+            {/* Password Row */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setActiveSecurityDrawer((prev) => (prev === 'password' ? null : 'password'))}
+                className="w-full py-3.5 flex items-center justify-between gap-4 text-left hover:bg-theme-subtle/50 -mx-2 px-2 rounded-lg transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-theme-subtle text-[20px]">key</span>
+                  <div>
+                    <span className="text-xs font-semibold text-theme-main block">
+                      {isAmharic ? 'የይለፍ ቃል' : 'Password'}
+                    </span>
+                    <span className="text-[11px] text-theme-subtle">
+                      {isAmharic ? 'የመግቢያ የይለፍ ቃልዎን ይቀይሩ' : 'Update your sign-in password'}
+                    </span>
+                  </div>
+                </div>
+                <ChevronRight
+                  className={`w-4 h-4 text-theme-subtle transition-transform shrink-0 ${
+                    activeSecurityDrawer === 'password' ? 'rotate-90 text-theme-main' : ''
+                  }`}
+                />
+              </button>
+
+              {activeSecurityDrawer === 'password' && (
+                <form onSubmit={handleUpdatePassword} className="pb-4 pt-1 pl-8 pr-2 space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="password"
+                      required
+                      minLength={8}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder={isAmharic ? 'አዲስ የይለፍ ቃል (ቢያንስ 8 ፊደላት)' : 'New password (min 8 chars)'}
+                      className="bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
+                    />
+                    <input
+                      type="password"
+                      required
+                      minLength={8}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder={isAmharic ? 'አዲሱን የይለፍ ቃል ያረጋግጡ' : 'Confirm new password'}
+                      className="bg-theme-subtle border border-theme rounded-lg px-3 py-2 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSecurityDrawer(null);
+                        setNewPassword('');
+                        setConfirmPassword('');
+                      }}
+                      className="px-3 py-2 text-xs text-theme-muted hover:text-theme-main cursor-pointer"
+                    >
+                      {t('common.cancel', 'Cancel')}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isUpdatingPassword || !newPassword}
+                      className="px-3.5 py-2 rounded-lg bg-theme-main text-theme-surface text-xs font-semibold cursor-pointer disabled:opacity-50"
+                    >
+                      {isUpdatingPassword ? 'Saving...' : (isAmharic ? 'የይለፍ ቃል አስቀምጥ' : 'Save Password')}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            {/* Export Marginalia Row */}
             <button
-              onClick={() => {
-                const next = fontSizePref === 'Standard' ? 'Magnified' : fontSizePref === 'Magnified' ? 'Compact' : 'Standard';
-                setFontSizePref(next);
-                onShowToast(isAmharic ? `የፊደል መጠን ወደ ${next} ተቀይሯል` : `Font size set to ${next}`);
-              }}
-              className="px-3 py-1 rounded-lg bg-theme-subtle hover:bg-theme-muted text-xs font-medium text-theme-main border border-theme cursor-pointer transition-colors"
+              type="button"
+              onClick={handleExportMarkdown}
+              disabled={isExportingNotes}
+              className="w-full py-3.5 flex items-center justify-between gap-4 text-left hover:bg-theme-subtle/50 -mx-2 px-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
             >
-              {isAmharic ? 'መጠን ቀይር' : 'Change Size'}
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-theme-subtle text-[20px]">file_download</span>
+                <div>
+                  <span className="text-xs font-semibold text-theme-main block">
+                    {isAmharic ? 'ማስታወሻዎችን እና ጥቅሶችን አውርድ' : 'Export Marginalia & Notes'}
+                  </span>
+                  <span className="text-[11px] text-theme-subtle">
+                    {isAmharic ? 'ሁሉንም የግል ማስታወሻዎች በማርክዳውን (.md) ያውርዱ' : 'Download all private notes as a Markdown (.md) file'}
+                  </span>
+                </div>
+              </div>
+              <span className="text-xs font-medium text-theme-accent shrink-0">
+                {isExportingNotes ? (isAmharic ? 'በማውረድ ላይ...' : 'Downloading...') : (isAmharic ? 'አውርድ (.md)' : 'Download .md')}
+              </span>
             </button>
           </div>
 
-          {/* Quiet Hours */}
-          <div className="flex items-center justify-between py-2.5 border-b border-theme">
-            <div className="flex items-center gap-3">
-              <span className="material-symbols-outlined text-theme-subtle text-[20px]">notifications_paused</span>
-              <div>
-                <span className="text-xs font-semibold text-theme-main block">
-                  {isAmharic ? 'አትረብሽ ሰዓታት' : 'Do Not Disturb Hours'}
-                </span>
-                <span className="text-[11px] text-theme-subtle">
-                  {isAmharic ? 'በማታ ሰዓታት ማሳወቂያዎችን አጥፋ' : 'Mute notifications during evening hours'}
-                </span>
-              </div>
-            </div>
+          {/* Subtle Danger Zone */}
+          <div className="pt-3 mt-1 border-t border-theme flex items-center justify-between">
+            <span className="text-[11px] text-theme-subtle">
+              {isAmharic ? 'መለያዎን እና ሁሉንም ውሂብ እስከመጨረሻው ይሰርዙ' : 'Permanently remove your profile and reading records'}
+            </span>
             <button
+              type="button"
               onClick={() => {
-                setQuietHoursEnabled(!quietHoursEnabled);
-                onShowToast(quietHoursEnabled ? (isAmharic ? 'አትረብሽ ጠፍቷል' : 'Do Not Disturb turned off') : (isAmharic ? 'አትረብሽ ነቅቷል' : 'Do Not Disturb activated'));
+                setDeleteConfirmText('');
+                setIsDeleteModalOpen(true);
               }}
-              className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
-                quietHoursEnabled ? 'bg-theme-accent' : 'bg-theme-subtle'
-              }`}
+              className="text-xs font-medium text-red-600 hover:underline cursor-pointer"
             >
-              <div
-                className={`w-4 h-4 rounded-full bg-white transition-transform absolute top-1 shadow-xs ${
-                  quietHoursEnabled ? 'left-6' : 'left-1'
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Private Reading Mode */}
-          <div className="flex items-center justify-between py-2.5 border-b border-theme">
-            <div className="flex items-center gap-3">
-              <span className="material-symbols-outlined text-theme-subtle text-[20px]">lock</span>
-              <div>
-                <span className="text-xs font-semibold text-theme-main block">
-                  {isAmharic ? 'የግል የንባብ ሁነታ' : 'Private Reading Mode'}
-                </span>
-                <span className="text-[11px] text-theme-subtle">
-                  {isAmharic ? 'የንባብ ሁኔታዎን ከሌሎች ይደብቁ' : 'Hide your active reading status from others'}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                setIsCloistered(!isCloistered);
-                onShowToast(isCloistered ? (isAmharic ? 'የንባብ ሁኔታ ይታያል' : 'Reading status visible to friends') : (isAmharic ? 'የንባብ ሁኔታ ሚስጥራዊ ተደርጓል' : 'Reading status set to private'));
-              }}
-              className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
-                isCloistered ? 'bg-theme-accent' : 'bg-theme-subtle'
-              }`}
-            >
-              <div
-                className={`w-4 h-4 rounded-full bg-white transition-transform absolute top-1 shadow-xs ${
-                  isCloistered ? 'left-6' : 'left-1'
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Commonplace Export */}
-          <div className="flex items-center justify-between py-2.5">
-            <div className="flex items-center gap-3">
-              <span className="material-symbols-outlined text-theme-subtle text-[20px]">file_download</span>
-              <div>
-                <span className="text-xs font-semibold text-theme-main block">
-                  {isAmharic ? 'ማስታወሻዎችን እና ጥቅሶችን አውርድ' : 'Export Notes & Highlights'}
-                </span>
-                <span className="text-[11px] text-theme-subtle">
-                  {isAmharic ? 'ሁሉንም ማስታወሻዎች በማርክዳውን ቅርጸት ያውርዱ' : 'Download all notes and quotes as Markdown'}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => onShowToast(isAmharic ? 'ማስታወሻዎች እየተዘጋጁ ነው (.md)...' : 'Exporting notes file (.md)...')}
-              className="px-3 py-1 rounded-lg bg-theme-subtle hover:bg-theme-muted text-xs font-medium text-theme-main border border-theme cursor-pointer transition-colors"
-            >
-              {isAmharic ? 'አውርድ' : 'Export'}
+              {isAmharic ? 'መለያ ሰርዝ' : 'Delete account'}
             </button>
           </div>
         </section>
 
-        {/* Portal Sign-in */}
+        {/* Sign Out */}
         <button
           onClick={onSignOut}
           className="w-full py-3 rounded-xl border border-theme bg-theme-surface hover:bg-theme-subtle text-red-600 text-xs font-label-md uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
@@ -631,7 +937,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </button>
               <button
                 type="submit"
-                className="flex-1 py-2.5 rounded-lg bg-theme-main text-white font-label-md text-xs uppercase tracking-wider font-semibold cursor-pointer hover:bg-theme-main/90 transition-opacity"
+                className="flex-1 py-2.5 rounded-lg bg-theme-main text-theme-surface font-label-md text-xs uppercase tracking-wider font-semibold cursor-pointer hover:opacity-90 transition-opacity"
               >
                 {isAmharic ? 'መገለጫ አስቀምጥ' : 'Save Profile'}
               </button>
@@ -640,61 +946,64 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
-      {/* Adjust Goal Modal */}
-      {isGoalModalOpen && (
+      {/* Delete Account Modal */}
+      {isDeleteModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="w-full max-w-md bg-theme-surface rounded-2xl p-6 shadow-2xl border border-theme">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-serif text-lg font-bold text-theme-main">
-                {isAmharic ? 'የ2025 የንባብ ግብ አስተካክል' : 'Adjust 2025 Reading Goal'}
+          <form
+            onSubmit={handleDeleteAccount}
+            className="w-full max-w-md bg-theme-surface rounded-2xl p-6 shadow-2xl border border-theme"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-theme">
+              <h3 className="font-serif text-lg font-bold text-red-600">
+                {isAmharic ? 'መለያዎን እስከመጨረሻው ይሰርዙ' : 'Delete Account Permanently'}
               </h3>
               <button
-                onClick={() => setIsGoalModalOpen(false)}
+                type="button"
+                onClick={() => setIsDeleteModalOpen(false)}
                 className="text-theme-subtle hover:text-theme-main p-1 rounded-full cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
-            <p className="text-xs text-theme-muted mb-5">
-              {isAmharic ? 'በዚህ ዓመት ለማንበብ ያሰቡትን የመጻሕፍት ብዛት ይወስኑ።' : 'Set your target number of books to read this year.'}
-            </p>
 
-            <div className="flex items-center justify-center gap-6 py-5 bg-theme-subtle rounded-xl border border-theme mb-5">
-              <button
-                onClick={() => setTempGoal(Math.max(user.booksRead, tempGoal - 1))}
-                className="w-10 h-10 rounded-full bg-theme-surface border border-theme text-xl font-bold text-theme-main hover:bg-theme-muted cursor-pointer flex items-center justify-center transition-colors"
-              >
-                −
-              </button>
-              <div className="text-center">
-                <span className="font-serif text-3xl font-bold text-theme-main">{tempGoal}</span>
-                <span className="block text-[10px] font-label-md uppercase tracking-wider text-theme-subtle">
-                  {isAmharic ? 'መጻሕፍት' : 'Books'}
-                </span>
+            <div className="mt-4 space-y-3 text-xs text-theme-body leading-relaxed">
+              <p>
+                {isAmharic
+                  ? 'ይህ እርምጃ ወደኋላ መመለስ አይቻልም። ሁሉም የንባብ መዝገቦችዎ እና የግል ማስታወሻዎችዎ ይሰረዛሉ።'
+                  : 'This action cannot be undone. Your profile, library shelves, and private marginalia notes will be permanently deleted.'}
+              </p>
+              <div>
+                <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1.5">
+                  {isAmharic ? 'ለማረጋገጥ DELETE ብለው ይጻፉ' : 'Type DELETE to confirm'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="DELETE"
+                  className="w-full bg-theme-subtle border border-theme rounded-lg p-2.5 text-xs text-theme-main focus:outline-none focus:border-red-500"
+                />
               </div>
-              <button
-                onClick={() => setTempGoal(tempGoal + 1)}
-                className="w-10 h-10 rounded-full bg-theme-surface border border-theme text-xl font-bold text-theme-main hover:bg-theme-muted cursor-pointer flex items-center justify-center transition-colors"
-              >
-                +
-              </button>
             </div>
 
-            <div className="flex gap-2.5">
+            <div className="flex gap-2.5 mt-6 pt-3 border-t border-theme">
               <button
-                onClick={() => setIsGoalModalOpen(false)}
+                type="button"
+                onClick={() => setIsDeleteModalOpen(false)}
                 className="flex-1 py-2.5 rounded-lg bg-theme-subtle hover:bg-theme-muted text-theme-main font-label-md text-xs uppercase tracking-wider cursor-pointer border border-theme transition-colors"
               >
                 {t('common.cancel', 'Cancel')}
               </button>
               <button
-                onClick={handleSaveGoal}
-                className="flex-1 py-2.5 rounded-lg bg-theme-main text-white font-label-md text-xs uppercase tracking-wider font-semibold cursor-pointer hover:bg-theme-main/90 transition-opacity"
+                type="submit"
+                disabled={deleteConfirmText !== 'DELETE' || isDeletingAccount}
+                className="flex-1 py-2.5 rounded-lg bg-red-600 text-white font-label-md text-xs uppercase tracking-wider font-semibold cursor-pointer disabled:opacity-40 hover:bg-red-700 transition-colors"
               >
-                {isAmharic ? 'ግብ አስቀምጥ' : 'Save Goal'}
+                {isDeletingAccount ? 'Deleting...' : (isAmharic ? 'መለያ ሰርዝ' : 'Delete Account')}
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
     </div>
