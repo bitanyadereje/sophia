@@ -16,6 +16,22 @@
   </head>
   <body class="min-h-full font-sans antialiased">
     <div id="root"></div>
+    <html lang="en" data-theme="cream"> <!-- fallback if JavaScript is off -->
+<head>
+  <script>
+    (function () {
+      var theme = 'cream';
+      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      try {
+        var saved = localStorage.getItem('sophia-theme'); // placeholder, see below
+        theme = saved || (prefersDark ? 'dark' : 'cream');
+      } catch (e) {
+        theme = prefersDark ? 'dark' : 'cream';
+      }
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

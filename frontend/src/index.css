@@ -38,30 +38,42 @@
   --color-theme-accent: var(--accent);
   --color-theme-text-muted: var(--text-muted);
   --color-theme-text-subtle: var(--text-subtle);
+
+  /* NEW: redesigned home screen tokens */
+  --color-theme: var(--border-color);            /* makes border-theme/70 etc. work */
+  --color-theme-primary: var(--primary);         /* solid primary button / active tag */
+  --color-theme-on-primary: var(--on-primary);   /* text on primary */
+  --color-theme-highlight: var(--highlight);     /* gold: progress, rules, focus rings (graphics only) */
+  --color-theme-strong: var(--border-strong);    /* secondary button borders, stepper line */
 }
 
 @layer base {
+  /* Clean Light (neutral off-white, charcoal & gold) */
   :root, [data-theme="light"] {
-    --bg-app: #f4f8fd;
+    --bg-app: #f7f7f6;
     --bg-surface: #ffffff;
-    --bg-subtle: #eef6ff;
-    --bg-muted: #deedfc;
-    --border-color: #cbdff7;
-    --border-subtle: #e2effd;
-    --text-main: #0c1e38;
-    --text-body: #1e3a5f;
-    --text-muted: #476585;
-    --text-subtle: #7b93af;
-    --accent: #0284c7;
-    --accent-light: #e0f2fe;
-    --accent-hover: #0369a1;
-    --gold: #d4af37;
+    --bg-subtle: #efefed;
+    --bg-muted: #e4e4e1;
+    --border-color: #e1e1de;
+    --border-subtle: #ececE9;
+    --text-main: #18181b;
+    --text-body: #3f3f46;
+    --text-muted: #5f5f68;
+    --text-subtle: #8a8a92;
+    --accent: #27272a;
+    --accent-light: #efefed;
+    --accent-hover: #18181b;
+    --gold: #b8860b;
     --brass: #b8860b;
-    --mahogany: #996515;
-    --scholar-green: #0284c7;
-    --crimson: #d4af37;
-    --crimson-light: #fefce8;
-    --crimson-border: #fef08a;
+    --mahogany: #3f3f46;
+    --scholar-green: #3d5a36;
+    --crimson: #842e1b;
+    --crimson-light: #f7ede8;
+    --crimson-border: #d4a99d;
+    --primary: #27272a;
+    --on-primary: #ffffff;
+    --highlight: #b8860b;
+    --border-strong: #a8a8a3;
     color-scheme: light;
   }
 
@@ -86,6 +98,10 @@
     --crimson: #e06d75;
     --crimson-light: #3d1b1e;
     --crimson-border: #6d2d32;
+    --primary: #dfba4f;
+    --on-primary: #0f1013;
+    --highlight: #dfba4f;
+    --border-strong: #4a5263;
     color-scheme: dark;
   }
 
@@ -111,6 +127,10 @@
     --crimson: #d4af37;
     --crimson-light: #fefce8;
     --crimson-border: #fef08a;
+    --primary: #0a1f3d;
+    --on-primary: #ffffff;
+    --highlight: #b8860b;
+    --border-strong: #8fa3c0;
     color-scheme: light;
   }
 
@@ -136,20 +156,24 @@
     --crimson: #881337;
     --crimson-light: #ffe4e6;
     --crimson-border: #fecdd3;
+    --primary: #881337;
+    --on-primary: #ffffff;
+    --highlight: #b8860b;
+    --border-strong: #c9a3ab;
     color-scheme: light;
   }
 
   /* Monastic Slate & Gray Theme */
   [data-theme="gray"] {
-    --bg-app: #f8fafc;
+    --bg-app: #f1f5f9;
     --bg-surface: #ffffff;
-    --bg-subtle: #f1f5f9;
-    --bg-muted: #e2e8f0;
+    --bg-subtle: #e2e8f0;
+    --bg-muted: #d9e1ea;
     --border-color: #cbd5e1;
     --border-subtle: #e2e8f0;
     --text-main: #0f172a;
     --text-body: #334155;
-    --text-muted: #64748b;
+    --text-muted: #556274;
     --text-subtle: #94a3b8;
     --accent: #334155;
     --accent-light: #f1f5f9;
@@ -161,6 +185,10 @@
     --crimson: #475569;
     --crimson-light: #f1f5f9;
     --crimson-border: #cbd5e1;
+    --primary: #334155;
+    --on-primary: #ffffff;
+    --highlight: #b8860b;
+    --border-strong: #94a3b8;
     color-scheme: light;
   }
 
@@ -186,6 +214,10 @@
     --crimson: #842e1b;
     --crimson-light: #f7ede8;
     --crimson-border: #d4a99d;
+    --primary: #3e2415;
+    --on-primary: #fbf7ee;
+    --highlight: #b8860b;
+    --border-strong: #b9a48a;
     color-scheme: light;
   }
 
@@ -211,6 +243,10 @@
     --crimson: #842e1b;
     --crimson-light: #f7ede8;
     --crimson-border: #d4a99d;
+    --primary: #3e2415;
+    --on-primary: #fbf7ee;
+    --highlight: #b8860b;
+    --border-strong: #bfa98a;
     color-scheme: light;
   }
 
@@ -249,6 +285,12 @@
 
     /* Monastic Scholar's Deep Green */
     --scholar-green: #1c4530;
+
+    /* Redesigned home screen tokens */
+    --primary: #27120a;
+    --on-primary: #faf4e8;
+    --highlight: #ad7820;
+    --border-strong: #b09a74;
 
     color-scheme: light;
   }
@@ -571,20 +613,25 @@
   background-color: var(--bg-subtle);
 }
 
-/* Light Mode: Light Blue & Golden Card Accents */
-[data-theme="light"], :root:not([data-theme="vintage"]):not([data-theme="dark"]):not([data-theme="navy"]):not([data-theme="burgundy"]):not([data-theme="gray"]):not([data-theme="brown"]) {
+/*
+ * Light Mode: neutral card accents.
+ * FIXED: this used to be `:root:not(vintage):not(dark)...` which also matched
+ * the cream theme and forced blue borders / blue fills onto it. It now only
+ * applies to the light theme or when no theme is set.
+ */
+[data-theme="light"], :root:not([data-theme]) {
   .bg-theme-surface {
     background-color: #ffffff;
-    box-shadow: 0 1px 4px 0 rgba(2, 132, 199, 0.05), 0 4px 14px -2px rgba(212, 175, 55, 0.07);
+    box-shadow: 0 1px 3px 0 rgba(24, 24, 27, 0.05), 0 4px 12px -2px rgba(24, 24, 27, 0.05);
   }
   .bg-theme-subtle {
-    background-color: #f0f7ff;
+    background-color: #efefed;
   }
   .border-theme {
-    border-color: #cbdff7;
+    border-color: #e1e1de;
   }
   .border-theme-subtle {
-    border-color: #e2effd;
+    border-color: #ececE9;
   }
 }
 
@@ -629,7 +676,7 @@
     box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 4px 12px -2px rgba(15, 23, 42, 0.04);
   }
   .bg-theme-subtle {
-    background-color: #f1f5f9;
+    background-color: #e2e8f0;
   }
   .border-theme {
     border-color: #cbd5e1;
@@ -830,4 +877,3 @@
 .material-symbols-thin {
   font-variation-settings: 'wght' 200, 'FILL' 0, 'opsz' 20;
 }
-
