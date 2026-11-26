@@ -14,7 +14,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
   onAuthenticated,
-  onShowToast
+  onShowToast,
 }) => {
   const { isAmharic } = useLanguage();
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -24,21 +24,59 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [passphrase, setPassphrase] = useState('');
   const [covenantAccepted, setCovenantAccepted] = useState(false);
-  const [selectedDiscipline, setSelectedDiscipline] = useState<string>('Patristics');
 
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const disciplines = ['Patristics', 'Eastern Orthodoxy', 'Monasticism', 'Scholasticism', 'Reformed'];
+  const switchMode = (mode: 'signin' | 'signup') => {
+    setAuthMode(mode);
+    setError(null);
+    setPassphrase('');
+    setShowPassword(false);
+  };
+
+  const handleForgotPassword = async () => {
+    setError(null);
+    if (!email.trim()) {
+      setError(
+        isAmharic
+          ? 'የይለፍ ቃል መቀየሪያ ሊንክ ለመላክ እባክዎ መጀመሪያ ኢሜይልዎን ያስገቡ።'
+          : 'Enter your email address above first so we can send a reset link.'
+      );
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: window.location.origin,
+      });
+      if (resetError) throw resetError;
+      onShowToast(
+        isAmharic
+          ? 'የይለፍ ቃል መቀየሪያ ሊንክ ወደ ኢሜይልዎ ተልኳል።'
+          : 'Password reset link sent to your email.'
+      );
+    } catch (err: any) {
+      setError(err?.message || 'Could not send reset email');
+    } finally {
+      setResetLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
     if (authMode === 'signup' && !covenantAccepted) {
-      setError(isAmharic ? 'እባክዎ የማህበረሰቡን መመሪያዎች ይቀበሉ።' : 'Please agree to the community reading guidelines.');
+      setError(
+        isAmharic
+          ? 'እባክዎ የማህበረሰቡን መመሪያዎች ይቀበሉ።'
+          : 'Please agree to the community reading guidelines.'
+      );
       return;
     }
 
@@ -46,27 +84,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     try {
       if (authMode === 'signup') {
+        const trimmedName = name.trim();
         const { data, error: signUpError } = await supabase.auth.signUp({
-          email,
+          email: email.trim(),
           password: passphrase,
           options: {
             data: {
-              name,
-              discipline: selectedDiscipline,
+              name: trimmedName,
             },
           },
         });
 
         if (signUpError) {
           setError(signUpError.message);
-          setLoading(false);
           return;
         }
 
-        // If email confirmation is off, session exists and user is logged in.
         if (data.session) {
           onAuthenticated();
-          onShowToast(isAmharic ? `እንኳን ደህና መጡ፣ ${name}!` : `Welcome, ${name}!`);
+          onShowToast(isAmharic ? `እንኳን ደህና መጡ፣ ${trimmedName}!` : `Welcome, ${trimmedName}!`);
           onClose();
         } else {
           onShowToast(
@@ -78,13 +114,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         }
       } else {
         const { data, error: signInError } = await supabase.auth.signInWithPassword({
-          email,
+          email: email.trim(),
           password: passphrase,
         });
 
         if (signInError) {
           setError(signInError.message);
-          setLoading(false);
           return;
         }
 
@@ -117,7 +152,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setError(oauthError.message);
       setLoading(false);
     }
-    // On success, the browser redirects to Google, so no further code runs here.
   };
 
   return (
@@ -126,17 +160,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Header with Logo */}
         <div className="flex items-center justify-between pb-3 border-b border-theme">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-theme-main text-white flex items-center justify-center shadow-xs flex-shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-theme-main text-theme-surface flex items-center justify-center shadow-xs flex-shrink-0">
               <BookOpen className="w-4 h-4 text-theme-accent" />
             </div>
             <div>
-              <h2 className="font-serif text-lg font-semibold text-theme-main">{isAmharic ? 'ሶፊያ' : 'Sophia'}</h2>
+              <h2 className="font-serif text-lg font-semibold text-theme-main">
+                {isAmharic ? 'ሶፊያ' : 'Sophia'}
+              </h2>
               <span className="text-[11px] text-theme-muted block -mt-0.5">
                 {isAmharic ? 'የአባላት መግቢያ' : 'Member Portal'}
               </span>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             aria-label={isAmharic ? 'ዝጋ' : 'Close'}
             title={isAmharic ? 'ዝጋ' : 'Close'}
@@ -150,18 +187,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="flex bg-theme-subtle rounded-xl p-1 my-4 border border-theme">
           <button
             type="button"
-            onClick={() => { setAuthMode('signin'); setError(null); }}
+            onClick={() => switchMode('signin')}
             className={`flex-1 py-1.5 rounded-lg text-xs font-label-md uppercase tracking-wider font-semibold transition-all cursor-pointer ${
-              authMode === 'signin' ? 'bg-theme-surface text-theme-main shadow-xs' : 'text-theme-muted hover:text-theme-main'
+              authMode === 'signin'
+                ? 'bg-theme-surface text-theme-main shadow-xs'
+                : 'text-theme-muted hover:text-theme-main'
             }`}
           >
             {isAmharic ? 'ግባ' : 'Sign In'}
           </button>
           <button
             type="button"
-            onClick={() => { setAuthMode('signup'); setError(null); }}
+            onClick={() => switchMode('signup')}
             className={`flex-1 py-1.5 rounded-lg text-xs font-label-md uppercase tracking-wider font-semibold transition-all cursor-pointer ${
-              authMode === 'signup' ? 'bg-theme-surface text-theme-main shadow-xs' : 'text-theme-muted hover:text-theme-main'
+              authMode === 'signup'
+                ? 'bg-theme-surface text-theme-main shadow-xs'
+                : 'text-theme-muted hover:text-theme-main'
             }`}
           >
             {isAmharic ? 'መለያ ፍጠር' : 'Create Account'}
@@ -176,6 +217,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </label>
               <input
                 type="text"
+                autoComplete="name"
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -191,6 +233,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </label>
             <input
               type="email"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -200,14 +243,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1">
-              {isAmharic ? 'የይለፍ ቃል' : 'Password'}
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold">
+                {isAmharic ? 'የይለፍ ቃል' : 'Password'}
+              </label>
+              {authMode === 'signin' && (
+                <button
+                  type="button"
+                  disabled={resetLoading}
+                  onClick={handleForgotPassword}
+                  className="text-[11px] text-theme-accent hover:underline cursor-pointer disabled:opacity-50"
+                >
+                  {resetLoading
+                    ? isAmharic
+                      ? 'በመላክ ላይ...'
+                      : 'Sending...'
+                    : isAmharic
+                      ? 'የይለፍ ቃል ረሱ?'
+                      : 'Forgot password?'}
+                </button>
+              )}
+            </div>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
+                autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}
                 required
-                minLength={6}
+                minLength={8}
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
                 placeholder="••••••••••••"
@@ -215,6 +277,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               />
               <button
                 type="button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-theme-subtle hover:text-theme-main cursor-pointer"
               >
@@ -225,34 +288,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
             {authMode === 'signup' && (
               <p className="text-[10px] text-theme-subtle mt-1">
-                {isAmharic ? 'ቢያንስ 6 ፊደሎች' : 'At least 6 characters'}
+                {isAmharic ? 'ቢያንስ 8 ፊደላት' : 'At least 8 characters'}
               </p>
             )}
           </div>
-
-          {authMode === 'signup' && (
-            <div>
-              <label className="block text-[11px] font-label-md uppercase tracking-wider text-theme-muted font-semibold mb-1.5">
-                {isAmharic ? 'የጥናት መስክ' : 'Primary Reading Interest'}
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {disciplines.map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setSelectedDiscipline(d)}
-                    className={`px-2.5 py-1 rounded-full text-xs transition-all cursor-pointer ${
-                      selectedDiscipline === d
-                        ? 'bg-theme-accent text-white font-semibold'
-                        : 'bg-theme-subtle text-theme-muted hover:bg-theme-muted'
-                    }`}
-                  >
-                    {d}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {authMode === 'signup' && (
             <label className="flex items-start gap-2 pt-1 text-xs text-theme-muted cursor-pointer">
@@ -263,33 +302,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 className="mt-0.5 rounded text-theme-accent focus:ring-theme-accent"
               />
               <span className="leading-snug">
-                {isAmharic ? 'የማህበረሰቡን የንባብ እና የውይይት መመሪያዎች ተቀብያለሁ።' : 'I agree to the community reading and discussion guidelines.'}
+                {isAmharic
+                  ? 'የማህበረሰቡን የንባብ እና የውይይት መመሪያዎች ተቀብያለሁ።'
+                  : 'I agree to the community reading and discussion guidelines.'}
               </span>
             </label>
           )}
 
           {error && (
             <div className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50">
-              <p className="text-xs text-red-700 dark:text-red-400 font-sans">
-                {error}
-              </p>
+              <p className="text-xs text-red-700 dark:text-red-400 font-sans">{error}</p>
             </div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 rounded-lg bg-theme-main hover:bg-theme-main/90 disabled:opacity-60 disabled:cursor-not-allowed text-white font-label-md text-xs uppercase tracking-wider font-semibold transition-colors mt-2 shadow-sm cursor-pointer inline-flex items-center justify-center gap-2"
+            className="w-full py-2.5 rounded-lg bg-theme-main hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed text-theme-surface font-label-md text-xs uppercase tracking-wider font-semibold transition-opacity mt-2 shadow-sm cursor-pointer inline-flex items-center justify-center gap-2"
           >
             {loading ? (
               <>
-                <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                <span className="material-symbols-outlined text-[16px] animate-spin">
+                  progress_activity
+                </span>
                 <span>{isAmharic ? 'በመጫን ላይ...' : 'Loading...'}</span>
               </>
             ) : authMode === 'signin' ? (
               isAmharic ? 'ወደ ሶፊያ ግባ' : 'Sign In to Sophia'
+            ) : isAmharic ? (
+              'መለያ ፍጠር'
             ) : (
-              isAmharic ? 'መለያ ፍጠር' : 'Create Scholarly Account'
+              'Create Scholarly Account'
             )}
           </button>
 
