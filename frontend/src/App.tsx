@@ -36,7 +36,7 @@ const INITIAL_USER: UserProfile = {
 };
 const INITIAL_COLLOQUIUM_COMMENTS: DialecticComment[] = [];
 const INITIAL_QUESTIONS: Question[] = [];
-const INITIAL_REVIEWS: Review[] = [];
+const EMPTY_REVIEWS: Review[] = [];
 
 export const App: React.FC = () => {
   const queryClient = useQueryClient();
@@ -73,6 +73,28 @@ export const App: React.FC = () => {
     enabled: Boolean(authUserId),
   });
 
+  const detailReviewId = selectedReviewId || targetReviewId;
+
+  const { data: selectedReview } = useQuery({
+    queryKey: ['review', detailReviewId],
+    queryFn: async () => {
+      const cachedFeed = queryClient.getQueryData<{ pages: Array<{ reviews: Review[] }> }>(['reviews-feed']);
+      const fromCache = cachedFeed?.pages
+        .flatMap((page) => page.reviews)
+        .find((r) => r.id === detailReviewId);
+      if (fromCache) return fromCache;
+
+      const { data, error } = await supabase
+        .from('reviews')
+        .select('*')
+        .eq('id', detailReviewId!)
+        .single();
+      if (error) throw error;
+      return data as Review;
+    },
+    enabled: currentScreen === 'review-detail' && Boolean(detailReviewId),
+  });
+
   const user: UserProfile = loadedProfile
     ? { ...INITIAL_USER, ...loadedProfile, themePreference: theme }
     : { ...INITIAL_USER, themePreference: theme };
@@ -82,7 +104,6 @@ export const App: React.FC = () => {
   const isGuestLanding = !isAdminRoute && !isAuthLoading && !authUserId && currentScreen === 'home';
 
   // --- FEATURE STATE ---
-  const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
   const [questions] = useState<Question[]>(INITIAL_QUESTIONS);
   const [colloquiumComments, setColloquiumComments] = useState<DialecticComment[]>(INITIAL_COLLOQUIUM_COMMENTS);
 
@@ -145,7 +166,10 @@ export const App: React.FC = () => {
   // --- NAVIGATION HANDLERS ---
   const handleNavigate = (screen: ScreenId) => {
     if (screen === 'discussions') setTargetQuestionId(null);
-    if (screen === 'reviews') setTargetReviewId(null);
+    if (screen === 'reviews') {
+      setTargetReviewId(null);
+      setSelectedReviewId(null);
+    }
     setCurrentScreen(screen);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -261,7 +285,7 @@ export const App: React.FC = () => {
         bookId = created.bookId;
       }
 
-      const newReview = await createReview(authUserId, {
+      await createReview(authUserId, {
         book_id: bookId,
         title: data.reviewTitle ?? data.title ?? null,
         content: data.content,
@@ -270,7 +294,7 @@ export const App: React.FC = () => {
         status: data.status ?? 'published',
       });
 
-      setReviews((previous) => [newReview, ...previous]);
+      await queryClient.invalidateQueries({ queryKey: ['reviews-feed'] });
       await queryClient.invalidateQueries({ queryKey: ['reviews'] });
       return { ok: true };
     } catch (error) {
@@ -281,8 +305,9 @@ export const App: React.FC = () => {
   const handleUpdateReview = async (id: string, updated: Partial<Review>): Promise<any> => {
     if (!authUserId) return { ok: false, error: 'You must be signed in to edit a review.' };
     try {
-      const review = await updateReview(id, authUserId, updated);
-      setReviews((previous) => previous.map((item) => item.id === id ? review : item));
+      await updateReview(id, authUserId, updated);
+      await queryClient.invalidateQueries({ queryKey: ['reviews-feed'] });
+      await queryClient.invalidateQueries({ queryKey: ['review', id] });
       await queryClient.invalidateQueries({ queryKey: ['reviews'] });
       return { ok: true };
     } catch (error) {
@@ -294,7 +319,8 @@ export const App: React.FC = () => {
     if (!authUserId) return { ok: false, error: 'You must be signed in to delete a review.' };
     try {
       await deleteReview(id, authUserId);
-      setReviews((previous) => previous.filter((review) => review.id !== id));
+      await queryClient.invalidateQueries({ queryKey: ['reviews-feed'] });
+      await queryClient.invalidateQueries({ queryKey: ['review', id] });
       await queryClient.invalidateQueries({ queryKey: ['reviews'] });
       return { ok: true };
     } catch (error) {
@@ -362,7 +388,7 @@ export const App: React.FC = () => {
             books={books} initialTab="library" userId={authUserId}
             onSelectBook={handleSelectBook}
             onSelectDiscussion={setTargetQuestionId}
-            onSelectReview={setTargetReviewId}
+            onSelectReview={handleSelectReview}
             onSelectPath={setSelectedPathId}
             onNavigate={handleNavigate}
             onShowToast={showToast}
@@ -392,7 +418,7 @@ export const App: React.FC = () => {
         {currentScreen === 'book-detail' && books.length > 0 && (
           <BookDetailView
             book={books.find((b) => b.id === selectedBookId) || books[0]}
-            questions={questions} reviews={reviews} currentUser={user}
+            questions={questions} reviews={EMPTY_REVIEWS} currentUser={user}
             onAddReview={handleAddReview}
             onAddReply={() => {}}
             onNavigate={handleNavigate}
@@ -446,7 +472,7 @@ export const App: React.FC = () => {
 
         {currentScreen === 'reviews' && (
           <ReviewsView
-            reviews={reviews}
+            reviews={EMPTY_REVIEWS}
             books={books}
             currentUser={user}
             authUserId={authUserId}
@@ -479,12 +505,16 @@ export const App: React.FC = () => {
           />
         )}
 
-        {currentScreen === 'review-detail' && reviews.length > 0 && (
+        {currentScreen === 'review-detail' && selectedReview && (
           <ReviewDetailView
-            review={reviews.find((r) => r.id === (selectedReviewId || targetReviewId)) || reviews[0]}
+            review={selectedReview}
             currentUser={user}
-            book={books.find((b) => b.id === (reviews.find((r) => r.id === (selectedReviewId || targetReviewId))?.book_id))}
-            onBack={() => { setCurrentScreen('reviews'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            book={books.find((b) => b.id === selectedReview.book_id)}
+            onBack={() => {
+              setSelectedReviewId(null);
+              setCurrentScreen('reviews');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
             onNavigate={handleNavigate}
             onSelectBook={handleSelectBook}
             onShowToast={showToast}
@@ -500,7 +530,7 @@ export const App: React.FC = () => {
             books={books} initialTab="bookmarks" userId={authUserId}
             onSelectBook={handleSelectBook}
             onSelectDiscussion={setTargetQuestionId}
-            onSelectReview={setTargetReviewId}
+            onSelectReview={handleSelectReview}
             onSelectPath={setSelectedPathId}
             onNavigate={handleNavigate}
             onShowToast={showToast}
