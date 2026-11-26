@@ -1,6 +1,25 @@
 import { supabase } from '../../lib/supabase';
 import { Review, UserProfile } from '../../types';
 
+export const FEED_PAGE_SIZE = 20;
+export type FeedCursor = Pick<Review, 'created_at' | 'id'>;
+
+export const loadReviewPage = async (cursor?: FeedCursor): Promise<Review[]> => {
+  let query = supabase
+    .from('reviews')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(FEED_PAGE_SIZE);
+
+  if (cursor) {
+    query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as Review[];
+};
+
 export const loadReviews = async (): Promise<Review[]> => {
   const { data, error } = await supabase.from('reviews').select('*').order('created_at', { ascending: false });
   if (error) throw error;

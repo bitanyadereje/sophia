@@ -83,6 +83,8 @@ export interface DiscussionPost {
   is_moderated: boolean;
   created_at: string;
   updated_at: string;
+  like_count: number;
+  reply_count: number;
 }
 
 export interface PostLike {
@@ -103,6 +105,8 @@ export interface Review {
   status: 'draft' | 'published';
   created_at: string;
   updated_at: string;
+  like_count: number;
+  comment_count: number;
 }
 
 export interface ReviewComment {

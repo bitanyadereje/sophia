@@ -17,6 +17,13 @@ export const loadReviewLikesForReviews = async (reviewIds: string[]): Promise<Re
   return (data ?? []) as ReviewLike[];
 };
 
+export const loadCurrentUserReviewLikes = async (reviewIds: string[], userId?: string | null): Promise<Set<string>> => {
+  if (!userId || reviewIds.length === 0) return new Set();
+  const { data, error } = await supabase.from('review_likes').select('review_id').eq('user_id', userId).in('review_id', reviewIds);
+  if (error) throw error;
+  return new Set((data ?? []).map((like) => like.review_id));
+};
+
 export const getReviewLikeData = async (reviewId: string, userId?: string): Promise<ReviewLikeData> => {
   const { count, error: countError } = await supabase
     .from('review_likes')

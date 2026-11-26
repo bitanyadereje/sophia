@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadDiscussionsWithAuthors, loadDiscussionTopics, loadAllReplies, loadPostLikes, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
+import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadCurrentUserPostLikes, loadDiscussionPage, loadDiscussionTopics, loadThreadRepliesWithAuthors, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
 import { useBookmarks } from '../../saved/useBookmarks';
 
 interface DiscussionsViewProps {
@@ -15,6 +15,7 @@ interface DiscussionsViewProps {
 
 const countAllReplies = (replies: QuestionReply[] = []): number =>
   replies.reduce((count, reply) => count + 1 + countAllReplies(reply.replies ?? []), 0);
+const EMPTY_LIKED_IDS = new Set<string>();
 
 // Fallback avatar helper that handles image loading errors gracefully with a monogram
 const AvatarWithFallback: React.FC<{
@@ -274,7 +275,9 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 }) => {
   const { t, isAmharic } = useLanguage();
   const queryClient = useQueryClient();
-  const discussionsKey = ['discussions'] as const;
+  // Do not share this key with HomeFeedView's ordinary useQuery: infinite queries
+  // require an { pages, pageParams } cache shape.
+  const discussionsKey = ['discussion-feed'] as const;
 
   // Navigation & View Mode
   const [activeThreadId, setActiveThreadId] = useState<string | null>(targetQuestionId || null);
@@ -289,50 +292,45 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
   const [likedReplies, setLikedReplies] = useState<Record<string, boolean>>({});
   const { isSaved, toggle: toggleSave } = useBookmarks(currentUser?.id, 'post', onShowToast);
 
-  const { data: questions = [], isPending } = useQuery<Question[]>({
+  const { data: discussionsData, isPending, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: discussionsKey,
-    queryFn: async () => {
-      const posts = await loadDiscussionsWithAuthors();
-      const [allReplies, likes, topicsByPost] = await Promise.all([
-        loadAllReplies(),
-        loadPostLikes(posts.map((post) => post.id)),
+    initialPageParam: undefined as { created_at: string; id: string } | undefined,
+    queryFn: async ({ pageParam }) => {
+      const posts = await loadDiscussionPage(pageParam);
+      const [likedIds, topicsByPost] = await Promise.all([
+        loadCurrentUserPostLikes(posts.map((post) => post.id), currentUser?.id),
         loadDiscussionTopics(posts.map((post) => post.id)),
       ]);
-      const replyIds = allReplies.map((reply) => reply.id);
-      const replyLikeRows = await loadPostLikes(replyIds);
-      const likesByPost = new Map<string, typeof replyLikeRows>();
-      for (const like of replyLikeRows) {
-        const rows = likesByPost.get(like.post_id) ?? [];
-        rows.push(like);
-        likesByPost.set(like.post_id, rows);
-      }
-      const repliesByParent = new Map<string, typeof allReplies>();
-      for (const reply of allReplies) {
-        if (!reply.parent_id) continue;
-        const replies = repliesByParent.get(reply.parent_id) ?? [];
-        replies.push(reply);
-        repliesByParent.set(reply.parent_id, replies);
-      }
-      const buildReplyTree = (parentId: string): QuestionReply[] => (repliesByParent.get(parentId) ?? []).map((reply) => {
-        const replyLikes = likesByPost.get(reply.id) ?? [];
-        return {
-          id: reply.id,
-          author: reply.author?.name || 'Reader',
-          authorAvatar: reply.author?.avatar_url || '',
-          timeAgo: new Date(reply.created_at).toLocaleDateString(),
-          text: reply.content,
-          likesCount: replyLikes.length,
-          userLiked: replyLikes.some((like) => like.user_id === currentUser?.id),
-          replies: buildReplyTree(reply.id),
-        };
-      });
       return posts.map((post) => ({
-        ...toQuestion(post, buildReplyTree(post.id)),
+        ...toQuestion(post),
         topic: (topicsByPost[post.id] || 'Reflections') as Question['topic'],
-        userLiked: likes.some((like) => like.post_id === post.id && like.user_id === currentUser?.id),
-        likesCount: likes.filter((like) => like.post_id === post.id).length,
+        userLiked: likedIds.has(post.id),
       }));
     },
+    getNextPageParam: (lastPage) => lastPage.length === 20
+      ? { created_at: lastPage[lastPage.length - 1].createdAt || '', id: lastPage[lastPage.length - 1].id }
+      : undefined,
+  });
+  const questions = useMemo<Question[]>(() => discussionsData?.pages.flat() ?? [], [discussionsData]);
+  const updateFeed = (update: (question: Question) => Question | null) => {
+    queryClient.setQueryData<any>(discussionsKey, (old: any) => old ? {
+      ...old,
+      pages: old.pages.map((page: Question[]) => page.flatMap((question) => {
+        const next = update(question);
+        return next ? [next] : [];
+      })),
+    } : old);
+  };
+
+  const { data: threadData = [] } = useQuery({
+    queryKey: ['discussion-thread', activeThreadId],
+    queryFn: () => loadThreadRepliesWithAuthors(activeThreadId!),
+    enabled: Boolean(activeThreadId),
+  });
+  const { data: threadLikedIds = EMPTY_LIKED_IDS } = useQuery({
+    queryKey: ['discussion-thread-likes', activeThreadId, currentUser?.id],
+    queryFn: () => loadCurrentUserPostLikes(threadData.map((reply) => reply.id), currentUser?.id),
+    enabled: Boolean(activeThreadId && currentUser?.id && threadData.length),
   });
 
   useEffect(() => {
@@ -357,6 +355,10 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     setLikedReplies(myReplyLikes);
   }, [questions]);
 
+  useEffect(() => {
+    setLikedReplies(Object.fromEntries([...threadLikedIds].map((id) => [id, true])));
+  }, [threadLikedIds]);
+
   const countRemovedReplies = (replies: QuestionReply[] = [], replyId: string): number => {
     const countTree = (items: QuestionReply[]): number => items.reduce((total, item) => total + 1 + countTree(item.replies ?? []), 0);
     for (const reply of replies) {
@@ -371,42 +373,33 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     mutationFn: (id: string) => deleteDiscussion(id, currentUser!.id),
     onMutate: async (id) => {
       await queryClient.cancelQueries({ queryKey: discussionsKey });
-      const previous = queryClient.getQueryData<Question[]>(discussionsKey);
-      queryClient.setQueryData<Question[]>(discussionsKey, (old = []) => old.filter((q) => q.id !== id));
+      const previous = queryClient.getQueryData(discussionsKey);
+      updateFeed((q) => q.id === id ? null : q);
       return { previous };
     },
     onError: (_error, _id, context) => {
       if (context?.previous) queryClient.setQueryData(discussionsKey, context.previous);
       onShowToast('Failed to delete. Restored.');
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: discussionsKey }),
   });
   const deleteReplyMutation = useMutation({
     mutationFn: (replyId: string) => deleteDiscussionReply(replyId, currentUser!.id),
     onMutate: async (replyId) => {
       await queryClient.cancelQueries({ queryKey: discussionsKey });
-      const previous = queryClient.getQueryData<Question[]>(discussionsKey);
-      const remove = (replies: QuestionReply[] = []): QuestionReply[] => replies
-        .filter((reply) => reply.id !== replyId)
-        .map((reply) => ({ ...reply, replies: remove(reply.replies) }));
-      queryClient.setQueryData<Question[]>(discussionsKey, (old = []) => old.map((question) => ({
-        ...question,
-        replies: remove(question.replies),
-        repliesCount: Math.max(0, question.repliesCount - countRemovedReplies(question.replies, replyId)),
-      })));
+      const previous = queryClient.getQueryData(discussionsKey);
       return { previous };
     },
     onError: (_error, _id, context) => {
       if (context?.previous) queryClient.setQueryData(discussionsKey, context.previous);
       onShowToast('Failed to delete reply. Restored.');
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: discussionsKey }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['discussion-thread', activeThreadId] }),
   });
   const createDiscussionMutation = useMutation({
     mutationFn: (data: { title: string; body: string; topic: string }) =>
       createDiscussion(currentUser!.id, data.title, data.body, data.topic),
     onSuccess: (created) => {
-      void queryClient.invalidateQueries({ queryKey: discussionsKey });
+      queryClient.setQueryData<any>(discussionsKey, (old: any) => old ? { ...old, pages: old.pages.map((page: Question[], index: number) => index === 0 ? [toQuestion(created), ...page] : page) } : old);
       onShowToast('Question posted!');
       setActiveThreadId(created.id);
       setNewTitle('');
@@ -450,12 +443,22 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     topic: (post.topic || 'Reflections') as Question['topic'],
     title: post.title || 'Discussion',
     body: post.content || '',
-    repliesCount: replies.length,
-    likesCount: Number(post.likesCount ?? 0),
+    repliesCount: Number(post.reply_count ?? replies.length),
+    likesCount: Number(post.like_count ?? post.likesCount ?? 0),
     replies,
   }), []);
 
   const activeQuestion = questions.find((q) => q.id === activeThreadId);
+  const threadReplies = useMemo(() => {
+    const byParent = new Map<string, typeof threadData>();
+    threadData.forEach((reply) => byParent.set(reply.parent_id!, [...(byParent.get(reply.parent_id!) ?? []), reply]));
+    const build = (parentId: string): QuestionReply[] => (byParent.get(parentId) ?? []).map((reply) => ({
+      id: reply.id, author: reply.author?.name || 'Reader', authorAvatar: reply.author?.avatar_url || '',
+      timeAgo: new Date(reply.created_at).toLocaleDateString(), text: reply.content,
+      likesCount: reply.like_count, userLiked: likedReplies[reply.id] ?? threadLikedIds.has(reply.id), replies: build(reply.id),
+    }));
+    return activeThreadId ? build(activeThreadId) : [];
+  }, [activeThreadId, likedReplies, threadData, threadLikedIds]);
 
   const isAuthor = (q: Question) => {
     if (!currentUser?.name || !q.author) return false;
@@ -487,9 +490,9 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     try {
       await togglePostLike(id, currentUser.id, isLiked);
       setLikedQuestions((prev) => ({ ...prev, [id]: !isLiked }));
-      queryClient.setQueryData<Question[]>(discussionsKey, (prev = []) => prev.map((question) => question.id === id
+      updateFeed((question) => question.id === id
         ? { ...question, likesCount: Math.max(0, question.likesCount + (isLiked ? -1 : 1)) }
-        : question));
+        : question);
       onShowToast(isLiked ? 'Like removed' : 'Liked discussion');
     } catch (error: any) { onShowToast(error?.message || 'Could not update like.'); }
   };
@@ -508,10 +511,6 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       await toggleReplyLike(replyId, currentUser.id, isLiked);
       const nextLiked = !isLiked;
       setLikedReplies((prev) => ({ ...prev, [replyId]: nextLiked }));
-      queryClient.setQueryData<Question[]>(discussionsKey, (prev = []) => prev.map((question) => ({
-        ...question,
-        replies: updateReplyTree(question.replies, replyId, nextLiked),
-      })));
       onShowToast(isLiked ? 'Like removed' : 'Liked reply');
     } catch (error: any) { onShowToast(error?.message || 'Could not update reply like.'); }
   };
@@ -520,7 +519,8 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     if (!currentUser?.id) { onShowToast('You must be signed in to reply.'); return; }
     try {
       await createReply(currentUser.id, parentId, text);
-      await queryClient.invalidateQueries({ queryKey: discussionsKey });
+      await queryClient.invalidateQueries({ queryKey: ['discussion-thread', activeThreadId] });
+      if (activeThreadId) updateFeed((question) => question.id === activeThreadId ? { ...question, repliesCount: question.repliesCount + 1 } : question);
       onShowToast(`Replied to ${replyToAuthor}`);
     } catch (error: any) { onShowToast(error?.message || 'Could not post reply.'); }
   };
@@ -529,7 +529,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     if (!currentUser?.id) { onShowToast('You must be signed in to edit a reply.'); throw new Error('Sign in required'); }
     try {
       await updateDiscussionReply(replyId, currentUser.id, content);
-      await queryClient.invalidateQueries({ queryKey: discussionsKey });
+      await queryClient.invalidateQueries({ queryKey: ['discussion-thread', activeThreadId] });
       onShowToast('Reply updated');
     } catch (error: any) {
       onShowToast(error?.message || 'Could not update reply.');
@@ -561,7 +561,8 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     if (!currentUser?.id) { onShowToast('You must be signed in to reply.'); return; }
     try {
       await createReply(currentUser.id, replyingTo?.replyId || activeQuestion.id, text);
-      await queryClient.invalidateQueries({ queryKey: discussionsKey });
+      await queryClient.invalidateQueries({ queryKey: ['discussion-thread', activeThreadId] });
+      updateFeed((question) => question.id === activeQuestion.id ? { ...question, repliesCount: question.repliesCount + 1 } : question);
       onShowToast(replyingTo ? `Replied to ${replyingTo.author}` : 'Reflection posted to thread');
       setThreadReplyInput('');
       setReplyingTo(null);
@@ -621,7 +622,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       }
       try {
         await updateDiscussion(editingQuestion.id, currentUser.id, newTitle, newBody, newTopic);
-        await queryClient.invalidateQueries({ queryKey: discussionsKey });
+        updateFeed((question) => question.id === editingQuestion.id ? { ...question, title: newTitle, body: newBody, topic: newTopic } : question);
         onShowToast('Discussion updated');
       } catch (error: any) {
         onShowToast(error?.message || 'Could not update discussion.');
@@ -808,7 +809,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
                   <div className="inline-flex items-center gap-1.5 text-theme-muted">
                     <span className="material-symbols-outlined text-[18px]">chat_bubble_outline</span>
-                    <span>{countAllReplies(activeQuestion.replies)} {isAmharic ? 'አስተያየቶች' : 'Contributions'}</span>
+                    <span>{activeQuestion.repliesCount} {isAmharic ? 'አስተያየቶች' : 'Contributions'}</span>
                   </div>
                 </div>
 
@@ -831,14 +832,14 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 <h2 className="font-serif font-bold text-base sm:text-lg text-theme-main flex items-center gap-2">
                   <span>{isAmharic ? 'የውይይት ፍሰት' : 'Discussion Stream'}</span>
                   <span className="text-xs font-sans font-normal text-theme-muted">
-                    ({countAllReplies(activeQuestion.replies)})
+                    ({activeQuestion.repliesCount})
                   </span>
                 </h2>
               </div>
 
-              {activeQuestion.replies && activeQuestion.replies.length > 0 ? (
+              {threadReplies.length > 0 ? (
                 <div className="space-y-6 sm:space-y-7 pt-2">
-                  {activeQuestion.replies.map((reply) => (
+                  {threadReplies.map((reply) => (
                     <NestedCommentItem
                       key={reply.id}
                       comment={reply}
@@ -1029,7 +1030,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 const isLiked = !!likedQuestions[q.id];
                 const saved = isSaved(q.id);
                 const likesCount = q.likesCount;
-                const totalReplies = countAllReplies(q.replies);
+                const totalReplies = q.repliesCount;
 
                 return (
                   <article
@@ -1142,6 +1143,13 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 </div>
               )}
             </div>
+            {hasNextPage && !searchQuery && selectedTopic === 'All' && (
+              <div className="col-span-full flex justify-center pt-3">
+                <button type="button" onClick={() => void fetchNextPage()} disabled={isFetchingNextPage} className="px-4 py-2 rounded-lg bg-theme-subtle text-theme-main text-xs font-semibold disabled:opacity-50">
+                  {isFetchingNextPage ? 'Loading…' : (isAmharic ? 'ተጨማሪ ጫን' : 'Load more')}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>

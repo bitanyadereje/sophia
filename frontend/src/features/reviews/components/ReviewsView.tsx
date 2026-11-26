@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Book, Review, ReviewLike, ScreenId, UserProfile } from '../../../types';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Book, Review, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { loadReviewerProfilesForReviews } from '../reviewerProfiles';
 import { addReviewComment, loadReviewCommentsForReviews } from '../services/reviewComment.service';
-import { loadReviewLikesForReviews, toggleReviewLike } from '../services/reviewInteraction.service';
-import { loadReviews } from '../review.service';
+import { loadCurrentUserReviewLikes, toggleReviewLike } from '../services/reviewInteraction.service';
+import { FEED_PAGE_SIZE, loadReviewPage } from '../review.service';
 import { useBookmarks } from '../../saved/useBookmarks';
 
 interface ReviewerProfile {
@@ -216,23 +216,32 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const profiles = reviewerProfiles;
   const { isSaved, toggle: toggleSave } = useBookmarks(authUserId, 'review', onShowToast);
 
-  const { data: feedData, isPending } = useQuery({
+  const { data: feedData, isPending, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: feedKey,
-    queryFn: async () => {
-      const loadedReviews = await loadReviews();
+    initialPageParam: undefined as { created_at: string; id: string } | undefined,
+    queryFn: async ({ pageParam }) => {
+      const loadedReviews = await loadReviewPage(pageParam);
       const reviewIds = loadedReviews.map((review) => review.id);
-      const [likes, comments, loadedProfiles] = await Promise.all([
-        loadReviewLikesForReviews(reviewIds),
-        loadReviewCommentsForReviews(reviewIds),
+      const [likedIds, loadedProfiles] = await Promise.all([
+        loadCurrentUserReviewLikes(reviewIds, authUserId),
         loadReviewerProfilesForReviews(loadedReviews),
       ]);
-      return { reviews: loadedReviews, likes, comments, profiles: loadedProfiles };
+      return { reviews: loadedReviews, likedIds, profiles: loadedProfiles };
     },
+    getNextPageParam: (lastPage) => lastPage.reviews.length === FEED_PAGE_SIZE
+      ? lastPage.reviews[lastPage.reviews.length - 1]
+      : undefined,
   });
 
-  const feedReviews = feedData?.reviews ?? reviews;
-  const reviewLikes = feedData?.likes ?? [];
-  const commentsByReview = (feedData?.comments ?? []).reduce<Record<string, LocalComment[]>>(
+  const feedReviews = feedData?.pages.flatMap((page) => page.reviews) ?? reviews;
+  const likedReviewIds = useMemo(() => new Set(feedData?.pages.flatMap((page) => [...page.likedIds]) ?? []), [feedData]);
+  const loadedProfiles = useMemo(() => Object.assign({}, ...(feedData?.pages.map((page) => page.profiles) ?? [])), [feedData]);
+  const { data: openComments = [] } = useQuery({
+    queryKey: ['review-comments', activeCommentId],
+    queryFn: () => loadReviewCommentsForReviews([activeCommentId!]),
+    enabled: Boolean(activeCommentId),
+  });
+  const commentsByReview = openComments.reduce<Record<string, LocalComment[]>>(
     (result, comment) => {
       const author = comment.author?.name?.trim() || comment.author?.username?.trim() || 'Reader';
       result[comment.review_id] = [
@@ -248,7 +257,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     },
     {}
   );
-  const loadedProfiles = feedData?.profiles as Record<string, ReviewerProfile> | undefined;
   const feedProfiles = { ...profiles, ...loadedProfiles };
 
   const toggleLikeMutation = useMutation({
@@ -261,14 +269,13 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
         old
           ? {
               ...old,
-              likes: wasLiked
-                ? old.likes.filter(
-                    (like: ReviewLike) => like.review_id !== reviewId || like.user_id !== userId
-                  )
-                : [
-                    ...old.likes,
-                    { review_id: reviewId, user_id: userId, created_at: new Date().toISOString() },
-                  ],
+              pages: old.pages.map((page: any) => ({
+                ...page,
+                likedIds: new Set(wasLiked ? [...page.likedIds].filter((id) => id !== reviewId) : [...page.likedIds, reviewId]),
+                reviews: page.reviews.map((review: Review) => review.id === reviewId
+                  ? { ...review, like_count: Math.max(0, review.like_count + (wasLiked ? -1 : 1)) }
+                  : review),
+              })),
             }
           : old
       );
@@ -277,13 +284,18 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     onError: (_error, _variables, context) => {
       if (context?.previous) queryClient.setQueryData(feedKey, context.previous);
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: feedKey }),
   });
 
   const addCommentMutation = useMutation({
     mutationFn: ({ reviewId, userId, content }: { reviewId: string; userId: string; content: string }) =>
       addReviewComment(reviewId, userId, content),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: feedKey }),
+    onSuccess: (_comment, { reviewId }) => {
+      void queryClient.invalidateQueries({ queryKey: ['review-comments', reviewId] });
+      queryClient.setQueryData<any>(feedKey, (old) => old ? {
+        ...old,
+        pages: old.pages.map((page: any) => ({ ...page, reviews: page.reviews.map((review: Review) => review.id === reviewId ? { ...review, comment_count: review.comment_count + 1 } : review) })),
+      } : old);
+    },
   });
 
   // Form fields
@@ -513,7 +525,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       return;
     }
 
-    const wasLiked = reviewLikes.some((like) => like.review_id === id && like.user_id === authUserId);
+    const wasLiked = likedReviewIds.has(id);
     toggleLikeMutation.mutate({ reviewId: id, userId: authUserId, wasLiked });
   };
 
@@ -2022,8 +2034,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
               const avatarUrl = profile?.avatar_url || profile?.avatar;
               const book = books.find((item) => item.id === review.book_id);
               const comments = commentsByReview[review.id] || [];
-              const likes = reviewLikes.filter((like) => like.review_id === review.id);
-              const isLiked = likes.some((like) => like.user_id === authUserId);
+              const isLiked = likedReviewIds.has(review.id);
               const isCommentOpen = activeCommentId === review.id;
               const saved = isSaved(review.id);
 
@@ -2216,7 +2227,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                         >
                           favorite
                         </span>
-                        <span>{likes.length}</span>
+                        <span>{review.like_count}</span>
                       </button>
 
                       <button
@@ -2227,8 +2238,8 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                         <span className="material-symbols-outlined text-[16px]">
                           chat_bubble_outline
                         </span>
-                        {comments.length > 0
-                          ? `${comments.length} ${isAmharic ? 'አስተያየቶች' : 'comments'}`
+                        {review.comment_count > 0
+                          ? `${review.comment_count} ${isAmharic ? 'አስተያየቶች' : 'comments'}`
                           : isAmharic
                             ? 'አስተያየት'
                             : 'Comment'}
@@ -2319,6 +2330,13 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                 </button>
               </div>
             )}
+          </div>
+        )}
+        {hasNextPage && !searchQuery && selectedTradition === 'All' && (
+          <div className="flex justify-center pt-5">
+            <button type="button" onClick={() => void fetchNextPage()} disabled={isFetchingNextPage} className="px-4 py-2 rounded-lg bg-theme-subtle text-theme-main text-xs font-semibold disabled:opacity-50">
+              {isFetchingNextPage ? 'Loading…' : (isAmharic ? 'ተጨማሪ ጫን' : 'Load more')}
+            </button>
           </div>
         )}
       </div>
