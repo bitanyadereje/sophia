@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { ScreenId, UserProfile, Book, DialecticComment, Question, Review, ThemeMode } from './types';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ScreenId, UserProfile, DialecticComment, Question, Review, ThemeMode } from './types';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { HomeFeedView } from './components/HomeFeedView';
+import { LandingView } from './components/LandingView';
 import { AuthModal } from './components/AuthModal';
 import { SearchModal } from './components/SearchModal';
 import { BookDetailView, BookDiscussionsDirectory, findOrCreateBook, loadBooks } from './features/books';
 import { ColloquiumView, DiscussionsView } from './features/discussions';
 import { PathsView } from './features/reading-paths';
-import { ReviewsView, createReview, deleteReview, loadReviews, mapReviewMutationError, ReviewDetailView, updateReview } from './features/reviews';
+import { ReviewsView, createReview, deleteReview, mapReviewMutationError, ReviewDetailView, updateReview } from './features/reviews';
 import { loadProfile, ProfileView, updateProfile, uploadAvatar } from './features/profile';
 import { SavedView } from './features/saved';
 import { NotesView } from './features/notes/components/NotesView';
@@ -18,7 +19,7 @@ import { supabase } from './lib/supabase';
 import { AdminDashboard } from './features/admin';
 
 // ============================================================
-// Temporary empty defaults
+// Empty defaults
 // ============================================================
 const INITIAL_USER: UserProfile = {
   id: '',
@@ -39,15 +40,14 @@ const INITIAL_REVIEWS: Review[] = [];
 
 export const App: React.FC = () => {
   const queryClient = useQueryClient();
+
   // --- GLOBAL STATE (Routing, Auth, Theme) ---
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('home');
   const [isAdminRoute, setIsAdminRoute] = useState(() => window.location.pathname === '/admin');
-  const [user, setUser] = useState<UserProfile>(INITIAL_USER);
   const [theme, setTheme] = useState<ThemeMode>(INITIAL_USER.themePreference || 'dark');
   const [authUserId, setAuthUserId] = useState<string | null>(null);
-  const isAdmin = user.role === 'admin';
-  const canCreateReadingPaths = Boolean(authUserId);
-  
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
   // --- GLOBAL UI STATE ---
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -61,69 +61,55 @@ export const App: React.FC = () => {
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const [previousScreen, setPreviousScreen] = useState<ScreenId>('colloquium');
 
-  // --- GLOBAL DATA LISTS (Passed down to screens) ---
-  const [books, setBooks] = useState<Book[]>([]);
+  // --- SERVER DATA VIA TANSTACK QUERY (Deduplicated & Cached) ---
+  const { data: books = [] } = useQuery({
+    queryKey: ['books'],
+    queryFn: loadBooks,
+  });
+
+  const { data: loadedProfile } = useQuery({
+    queryKey: ['profile', authUserId],
+    queryFn: () => loadProfile(authUserId!),
+    enabled: Boolean(authUserId),
+  });
+
+  const user: UserProfile = loadedProfile
+    ? { ...INITIAL_USER, ...loadedProfile, themePreference: theme }
+    : { ...INITIAL_USER, themePreference: theme };
+
+  const isAdmin = user.role === 'admin';
+  const canCreateReadingPaths = Boolean(authUserId);
+  const isGuestLanding = !isAdminRoute && !isAuthLoading && !authUserId && currentScreen === 'home';
+
+  // --- FEATURE STATE ---
   const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
-  
-  // --- FEATURE STATE (Will be moved to components later) ---
-  const [questions, setQuestions] = useState<Question[]>(INITIAL_QUESTIONS);
+  const [questions] = useState<Question[]>(INITIAL_QUESTIONS);
   const [colloquiumComments, setColloquiumComments] = useState<DialecticComment[]>(INITIAL_COLLOQUIUM_COMMENTS);
 
   const showToast = (msg: string) => setToastMessage(msg);
 
-  // --- AUTH & INITIAL FETCH ---
-  const refreshProfile = async (userId: string) => {
-    try {
-      const profile = await loadProfile(userId);
-      setUser(prev => ({ ...prev, ...profile }));
-    } catch (error) {
-      console.error('Failed to load profile:', error);
-    }
-  };
-
+  // --- BROWSER SIDE EFFECTS (Auth listener, URL popstate, Theme DOM, Toast timer) ---
   useEffect(() => {
-    let isMounted = true;
-    const loadCurrentProfile = async (userId: string) => {
-      if (isMounted) await refreshProfile(userId);
-    };
-
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) console.error('Failed to load auth session:', error);
       setAuthUserId(session?.user?.id ?? null);
-      if (session?.user) {
-        setUser(INITIAL_USER);
-        void loadCurrentProfile(session.user.id);
-      }
+      setIsAuthLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const userId = session?.user?.id ?? null;
       setAuthUserId(userId);
-      if (userId) {
-        setUser(INITIAL_USER);
-        void loadCurrentProfile(userId);
-      } else if (isMounted) {
-        setUser(INITIAL_USER);
+      setIsAuthLoading(false);
+      if (!userId) {
+        queryClient.removeQueries({ queryKey: ['profile'] });
       }
     });
 
-    // Load global lists
-    loadBooks()
-      .then(setBooks)
-      .catch((error) => console.error('Failed to load books:', error));
-
-    loadReviews()
-      .then(setReviews)
-      .catch((error) => console.error('Failed to load reviews:', error));
-
     return () => {
-      isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [queryClient]);
 
-  // The application otherwise uses lightweight screen state instead of a router.
-  // Keep /admin a real, bookmarkable browser route without adding a routing library.
   useEffect(() => {
     const onPopState = () => setIsAdminRoute(window.location.pathname === '/admin');
     window.addEventListener('popstate', onPopState);
@@ -136,17 +122,19 @@ export const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // --- THEME ---
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
   const handleSetTheme = (newTheme: ThemeMode) => {
     setTheme(newTheme);
-    setUser((prev) => ({ ...prev, themePreference: newTheme }));
+    if (authUserId) {
+      queryClient.setQueryData(['profile', authUserId], (prev: UserProfile | undefined) =>
+        prev ? { ...prev, themePreference: newTheme } : prev
+      );
+    }
   };
 
-  // --- TOAST TIMEOUT ---
   useEffect(() => {
     if (toastMessage) {
       const timer = setTimeout(() => setToastMessage(null), 3200);
@@ -155,6 +143,13 @@ export const App: React.FC = () => {
   }, [toastMessage]);
 
   // --- NAVIGATION HANDLERS ---
+  const handleNavigate = (screen: ScreenId) => {
+    if (screen === 'discussions') setTargetQuestionId(null);
+    if (screen === 'reviews') setTargetReviewId(null);
+    setCurrentScreen(screen);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleNavigateToDiscussion = (questionId: string) => {
     setTargetQuestionId(questionId);
     setCurrentScreen('discussions');
@@ -189,14 +184,17 @@ export const App: React.FC = () => {
 
   // --- PROFILE HANDLERS ---
   const handleUpdateUser = async (updated: Partial<UserProfile>) => {
-    setUser(prev => ({ ...prev, ...updated }));
-    if (authUserId) {
-      try {
-        await updateProfile(authUserId, updated);
-      } catch (error) {
-        console.error('Failed to save profile update:', error);
-        showToast('Failed to save to database');
-      }
+    if (!authUserId) return;
+    queryClient.setQueryData(['profile', authUserId], (prev: UserProfile | undefined) =>
+      prev ? { ...prev, ...updated } : prev
+    );
+    try {
+      await updateProfile(authUserId, updated);
+      await queryClient.invalidateQueries({ queryKey: ['profile', authUserId] });
+    } catch (error) {
+      console.error('Failed to save profile update:', error);
+      showToast('Failed to save to database');
+      await queryClient.invalidateQueries({ queryKey: ['profile', authUserId] });
     }
   };
 
@@ -204,7 +202,9 @@ export const App: React.FC = () => {
     if (!authUserId) return showToast('You must be logged in');
     try {
       const publicUrl = await uploadAvatar(authUserId, file);
-      setUser(prev => ({ ...prev, avatar: publicUrl }));
+      queryClient.setQueryData(['profile', authUserId], (prev: UserProfile | undefined) =>
+        prev ? { ...prev, avatar: publicUrl } : prev
+      );
       showToast('Profile picture updated!');
     } catch (error: any) {
       console.error('Upload failed:', error);
@@ -217,7 +217,7 @@ export const App: React.FC = () => {
     if (error) return console.error('Failed to get authenticated user:', error);
     if (authUser) {
       setAuthUserId(authUser.id);
-      await refreshProfile(authUser.id);
+      await queryClient.invalidateQueries({ queryKey: ['profile', authUser.id] });
     }
   };
 
@@ -225,7 +225,7 @@ export const App: React.FC = () => {
     const { error } = await supabase.auth.signOut();
     if (error) return showToast('Could not sign out');
     setAuthUserId(null);
-    setUser(INITIAL_USER);
+    queryClient.removeQueries({ queryKey: ['profile'] });
     setCurrentScreen('home');
     showToast('Signed out');
   };
@@ -235,7 +235,6 @@ export const App: React.FC = () => {
     if (!authUserId) return { ok: false, error: 'You must be signed in to add a new book.' };
     try {
       const book = await findOrCreateBook(input, authUserId);
-      setBooks((previous) => previous.some((item) => item.id === book.id) ? previous : [book, ...previous]);
       await queryClient.invalidateQueries({ queryKey: ['books'] });
       return { ok: true, bookId: book.id };
     } catch (error) {
@@ -244,10 +243,10 @@ export const App: React.FC = () => {
     }
   };
 
-  // --- REVIEW HANDLERS (Data logic stays here, UI logic moves to component) ---
+  // --- REVIEW HANDLERS ---
   const handleAddReview = async (data: any): Promise<any> => {
     if (!authUserId) return { ok: false, error: 'You must be signed in to publish a review.' };
-    
+
     try {
       let bookId = data.book_id as string | undefined;
       if (!bookId) {
@@ -265,11 +264,14 @@ export const App: React.FC = () => {
       const newReview = await createReview(authUserId, {
         book_id: bookId,
         title: data.reviewTitle ?? data.title ?? null,
-        content: data.content, rating: data.rating, quote: data.quote || null,
+        content: data.content,
+        rating: data.rating,
+        quote: data.quote || null,
         status: data.status ?? 'published',
       });
-      
+
       setReviews((previous) => [newReview, ...previous]);
+      await queryClient.invalidateQueries({ queryKey: ['reviews'] });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : mapReviewMutationError(error) };
@@ -281,6 +283,7 @@ export const App: React.FC = () => {
     try {
       const review = await updateReview(id, authUserId, updated);
       setReviews((previous) => previous.map((item) => item.id === id ? review : item));
+      await queryClient.invalidateQueries({ queryKey: ['reviews'] });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: mapReviewMutationError(error) };
@@ -292,6 +295,7 @@ export const App: React.FC = () => {
     try {
       await deleteReview(id, authUserId);
       setReviews((previous) => previous.filter((review) => review.id !== id));
+      await queryClient.invalidateQueries({ queryKey: ['reviews'] });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: mapReviewMutationError(error) };
@@ -300,7 +304,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-theme-app text-theme-body relative flex flex-col font-sans antialiased selection:bg-theme-accent-light selection:text-theme-accent transition-colors duration-200">
-      
+
       {/* TOAST */}
       {toastMessage && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 bg-theme-main text-theme-surface text-xs font-label-md rounded-full shadow-lg border border-theme-subtle/40 flex items-center gap-2 animate-fade-in pointer-events-none">
@@ -309,40 +313,48 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {!isAdminRoute && <Header
-        currentScreen={currentScreen}
-        onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-        user={user}
-        onOpenSearch={() => setIsSearchOpen(true)}
-        onOpenAuth={() => setIsAuthOpen(true)}
-        onSignOut={handleSignOut}
-        theme={theme}
-        onSetTheme={handleSetTheme}
-      />}
+      {!isAdminRoute && !isGuestLanding && (
+        <Header
+          currentScreen={currentScreen}
+          onNavigate={handleNavigate}
+          user={user}
+          onOpenSearch={() => setIsSearchOpen(true)}
+          onOpenAuth={() => setIsAuthOpen(true)}
+          onSignOut={handleSignOut}
+          theme={theme}
+          onSetTheme={handleSetTheme}
+        />
+      )}
 
       <main className={`flex-1 flex flex-col ${currentScreen === 'home' ? '' : 'page-typography'}`}>
-        
+
         {isAdminRoute ? (
           <AdminDashboard userId={authUserId} profile={user} onExit={leaveAdmin} onShowToast={showToast} />
         ) : <>
-        {currentScreen === 'home' && (
-          <HomeFeedView
-            user={user}
-            userId={authUserId}
-            books={books}
-            onUpdateUser={handleUpdateUser}
-            onNavigate={(s) => {
-              if (s === 'discussions') setTargetQuestionId(null);
-              if (s === 'reviews') setTargetReviewId(null);
-              setCurrentScreen(s);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onSelectBook={handleSelectBook}
-            onOpenSeminar={handleOpenSeminar}
-            onShowToast={showToast}
-            onNavigateToDiscussion={handleNavigateToDiscussion}
-            onNavigateToReview={handleNavigateToReview}
-          />
+        {currentScreen === 'home' && !isAuthLoading && (
+          isGuestLanding ? (
+            <LandingView
+              books={books}
+              onNavigate={handleNavigate}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              onNavigateToDiscussion={handleNavigateToDiscussion}
+              onNavigateToReview={handleNavigateToReview}
+              onSelectBook={handleSelectBook}
+            />
+          ) : (
+            <HomeFeedView
+              user={user}
+              userId={authUserId}
+              books={books}
+              onUpdateUser={handleUpdateUser}
+              onNavigate={handleNavigate}
+              onSelectBook={handleSelectBook}
+              onOpenSeminar={handleOpenSeminar}
+              onShowToast={showToast}
+              onNavigateToDiscussion={handleNavigateToDiscussion}
+              onNavigateToReview={handleNavigateToReview}
+            />
+          )
         )}
 
         {currentScreen === 'library' && (
@@ -352,7 +364,7 @@ export const App: React.FC = () => {
             onSelectDiscussion={setTargetQuestionId}
             onSelectReview={setTargetReviewId}
             onSelectPath={setSelectedPathId}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onShowToast={showToast}
           />
         )}
@@ -362,7 +374,7 @@ export const App: React.FC = () => {
             currentUser={user}
             targetQuestionId={targetQuestionId}
             onClearTargetQuestion={() => setTargetQuestionId(null)}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onShowToast={showToast}
           />
         )}
@@ -372,7 +384,7 @@ export const App: React.FC = () => {
             books={books}
             onSelectBook={handleSelectBook}
             onOpenSeminar={handleOpenSeminar}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onShowToast={showToast}
           />
         )}
@@ -383,7 +395,7 @@ export const App: React.FC = () => {
             questions={questions} reviews={reviews} currentUser={user}
             onAddReview={handleAddReview}
             onAddReply={() => {}}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onOpenSeminar={handleOpenSeminar}
             onShowToast={showToast}
           />
@@ -395,7 +407,7 @@ export const App: React.FC = () => {
             comments={colloquiumComments}
             onAddComment={(c) => setColloquiumComments(prev => [...prev, c])}
             onBack={() => { setCurrentScreen(previousScreen === 'seminar' ? 'colloquium' : previousScreen); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onShowToast={showToast}
           />
         )}
@@ -405,7 +417,7 @@ export const App: React.FC = () => {
             isDetailView={false}
             selectedPathId={selectedPathId}
             onSelectPath={setSelectedPathId}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onShowToast={showToast}
             userId={authUserId || ''}
             canCreatePaths={canCreateReadingPaths || false}
@@ -421,7 +433,7 @@ export const App: React.FC = () => {
             isDetailView={true}
             selectedPathId={selectedPathId}
             onSelectPath={setSelectedPathId}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onShowToast={showToast}
             userId={authUserId || ''}
             canCreatePaths={canCreateReadingPaths || false}
@@ -445,12 +457,7 @@ export const App: React.FC = () => {
             onDeleteReview={handleDeleteReview}
             onSelectBook={handleSelectBook}
             onSelectReview={handleSelectReview}
-            onNavigate={(s) => {
-              if (s === 'reviews') setTargetReviewId(null);
-              if (s === 'discussions') setTargetQuestionId(null);
-              setCurrentScreen(s);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onNavigate={handleNavigate}
             onShowToast={showToast}
             loadMarginalia={async (bookId) => {
               if (!authUserId || !bookId) return [];
@@ -478,7 +485,7 @@ export const App: React.FC = () => {
             currentUser={user}
             book={books.find((b) => b.id === (reviews.find((r) => r.id === (selectedReviewId || targetReviewId))?.book_id))}
             onBack={() => { setCurrentScreen('reviews'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onSelectBook={handleSelectBook}
             onShowToast={showToast}
           />
@@ -495,7 +502,7 @@ export const App: React.FC = () => {
             onSelectDiscussion={setTargetQuestionId}
             onSelectReview={setTargetReviewId}
             onSelectPath={setSelectedPathId}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onShowToast={showToast}
           />
         )}
@@ -505,7 +512,7 @@ export const App: React.FC = () => {
             user={user}
             onUpdateUser={handleUpdateUser}
             onAvatarUpload={handleAvatarUpload}
-            onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onNavigate={handleNavigate}
             onOpenAuth={() => setIsAuthOpen(true)}
             onSignOut={handleSignOut}
             onShowToast={showToast}
@@ -516,25 +523,31 @@ export const App: React.FC = () => {
         </>}
       </main>
 
-      {!isAdminRoute && <BottomNav
-        currentScreen={currentScreen}
-        onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-        theme={theme}
-      />}
+      {!isAdminRoute && !isGuestLanding && (
+        <BottomNav
+          currentScreen={currentScreen}
+          onNavigate={handleNavigate}
+          theme={theme}
+        />
+      )}
 
-      {!isAdminRoute && <SearchModal
-        isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
-        books={books} questions={questions} authUserId={authUserId}
-        onNavigate={(s) => { setCurrentScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-      />}
+      {!isAdminRoute && (
+        <SearchModal
+          isOpen={isSearchOpen}
+          onClose={() => setIsSearchOpen(false)}
+          books={books} questions={questions} authUserId={authUserId}
+          onNavigate={handleNavigate}
+        />
+      )}
 
-      {!isAdminRoute && <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        onAuthenticated={handleAuthenticated}
-        onShowToast={showToast}
-      />}
+      {!isAdminRoute && (
+        <AuthModal
+          isOpen={isAuthOpen}
+          onClose={() => setIsAuthOpen(false)}
+          onAuthenticated={handleAuthenticated}
+          onShowToast={showToast}
+        />
+      )}
     </div>
   );
 };

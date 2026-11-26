@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Book, Review, ScreenId, UserProfile } from '../types';
+import { Book, ScreenId, UserProfile } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { loadUserLibrary, updateBookStatus } from '../features/library/library.service';
-import { loadDiscussionsWithAuthors, loadAllReplies, loadDiscussionTopics } from '../features/discussions/services/discussion.service';
+import { loadDiscussionsWithAuthors, loadDiscussionTopics } from '../features/discussions/services/discussion.service';
 import { loadReviews } from '../features/reviews/review.service';
 import { loadReviewerProfilesForReviews } from '../features/reviews/reviewerProfiles';
 import { createNote } from '../features/notes/notes.service';
@@ -12,24 +12,40 @@ interface ReadingTreatise {
   id: string;
   title: string;
   author: string;
-  location: string;
+  pagesRead: number;
+  pageCount: number | null;
   progress: number;
+  cover?: string | null;
   discussionPrompt: string;
   discussionReplies: number;
+  seminarNew: number;
 }
 
-interface HomeInsight {
+/** Optional: pass the reader's active path to show the "Your path" stepper. */
+export interface PathSummary {
   id: string;
+  title: string;
+  steps: { id: string; title: string; status: 'done' | 'current' | 'upcoming' }[];
+}
+
+interface FeedItem {
+  key: string;
   kind: 'discussion' | 'review';
+  id: string;
+  tag: string;
+  highlight: boolean;
   title: string;
   meta: string;
-  createdAt: string;
+  count: string;
+  priority: number;
+  activityAt: number;
 }
 
 interface HomeFeedViewProps {
   user?: UserProfile;
   userId?: string | null;
   books?: Book[];
+  activePath?: PathSummary | null;
   onUpdateUser?: (updated: Partial<UserProfile>) => void;
   onNavigate: (screen: ScreenId) => void;
   onSelectBook?: (bookId: string) => void;
@@ -38,6 +54,98 @@ interface HomeFeedViewProps {
   onNavigateToDiscussion?: (questionId: string) => void;
   onNavigateToReview?: (reviewId: string) => void;
 }
+
+interface Post {
+  id: string;
+  title?: string | null;
+  content: string;
+  created_at?: string | null;
+  book_id?: string | null;
+  user_id?: string;
+  reply_count?: number;
+}
+
+const ts = (iso?: string | null) => (iso ? new Date(iso).getTime() : 0);
+
+const timeAgo = (time: number) => {
+  const mins = Math.max(1, Math.round((Date.now() - time) / 60000));
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
+  return `${Math.round(mins / 1440)}d ago`;
+};
+
+const formatReplyCount = (n: number) => `${n} ${n === 1 ? 'reply' : 'replies'}`;
+
+/* ------------------------------------------------------------------ */
+/* Shared styles                                                       */
+/* Rules: serif = headings/titles only. Sans = buttons, meta, body.    */
+/* One primary action per card; all other actions share SECONDARY.     */
+/* Minimum text size 13px. Touch targets 44px.                         */
+/* ------------------------------------------------------------------ */
+const FOCUS = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-theme-highlight';
+const BTN_BASE = `inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 rounded-[10px] font-sans text-sm whitespace-nowrap transition-colors cursor-pointer ${FOCUS}`;
+const BTN_PRIMARY = `${BTN_BASE} bg-theme-primary text-theme-on-primary font-semibold hover:bg-theme-primary/90 disabled:opacity-50`;
+const BTN_SECONDARY = `${BTN_BASE} bg-theme-surface text-theme-main font-medium border border-theme-strong hover:bg-theme-subtle`;
+const GHOST_BTN = `${BTN_BASE} text-theme-muted hover:text-theme-main`;
+const DARK_BTN = BTN_PRIMARY;
+const SECTION_LABEL = 'text-[13px] font-sans font-semibold uppercase tracking-[0.12em] text-theme-muted whitespace-nowrap';
+
+/** Book cover: real image when the book has one, otherwise a generated cover. Fixed 3:4 ratio. */
+const BookCover: React.FC<{ title: string; src?: string | null; className?: string }> = ({ title, src, className = '' }) =>
+  src ? (
+    <div className={`overflow-hidden aspect-[3/4] rounded-r-lg rounded-l-sm border border-theme/70 bg-theme-subtle shadow-md ${className}`}>
+      <img src={src} alt={`Cover of ${title}`} className="w-full h-full object-cover" />
+    </div>
+  ) : (
+    <div
+      aria-hidden="true"
+      className={`relative aspect-[3/4] flex flex-col items-center justify-center gap-2 rounded-r-lg rounded-l-sm bg-theme-subtle border border-theme shadow-md ${className}`}
+    >
+      <div className="absolute inset-1.5 rounded-r-md rounded-l-[2px] border border-theme-highlight/60 pointer-events-none" />
+      <span className="material-symbols-outlined text-theme-highlight text-[22px]">menu_book</span>
+      <span className="font-serif text-[13px] leading-tight text-center text-theme-main px-3 line-clamp-3">{title}</span>
+    </div>
+  );
+
+const ModalShell: React.FC<{
+  label: string;
+  heading: string;
+  sub?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  footer: React.ReactNode;
+  as?: 'div' | 'form';
+  onSubmit?: (e: React.FormEvent) => void;
+}> = ({ label, heading, sub, onClose, children, footer, as = 'div', onSubmit }) => {
+  const Tag = as as React.ElementType;
+  return (
+    <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <Tag
+        onSubmit={onSubmit}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+        className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"
+      >
+        <div className="flex items-start justify-between border-b border-theme pb-3">
+          <div>
+            <span className="text-[13px] font-sans uppercase tracking-[0.12em] text-theme-muted block">{label}</span>
+            <h3 className="font-serif font-semibold text-xl text-theme-main mt-0.5">{heading}</h3>
+            {sub && <p className="text-sm text-theme-muted font-sans">{sub}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className={`w-10 h-10 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer ${FOCUS}`}
+            aria-label="Close dialog"
+          >
+            <span className="material-symbols-outlined text-[20px]">close</span>
+          </button>
+        </div>
+        {children}
+        <div className="pt-3 border-t border-theme flex items-center justify-end gap-2">{footer}</div>
+      </Tag>
+    </div>
+  );
+};
 
 export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
   user = {
@@ -55,6 +163,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
   },
   userId,
   books = [],
+  activePath = null,
   onUpdateUser,
   onNavigate,
   onSelectBook,
@@ -66,11 +175,97 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
   const { isAmharic } = useLanguage();
   const queryClient = useQueryClient();
   const currentUserId = userId ?? user.id;
+
+  const seenKey = `sophia-home-seen-${currentUserId || 'guest'}`;
+  const [lastSeen] = useState(() => {
+    try {
+      return Number(localStorage.getItem(seenKey)) || Date.now() - 7 * 86400000;
+    } catch {
+      return Date.now() - 7 * 86400000;
+    }
+  });
+  useEffect(
+    () => () => {
+      try {
+        localStorage.setItem(seenKey, String(Date.now()));
+      } catch {
+        /* storage unavailable */
+      }
+    },
+    [seenKey]
+  );
+
   const { data: library = [], isPending: isLibraryPending } = useQuery({
     queryKey: ['library', currentUserId],
     queryFn: () => loadUserLibrary(currentUserId!),
     enabled: Boolean(currentUserId),
   });
+
+  // This is a compact home-feed snapshot, not the paginated Discussions cache.
+  // A useQuery cache must never share a key with useInfiniteQuery.
+  const { data: discussionsData, isPending: isPostsPending } = useQuery({
+    queryKey: ['home-discussions'],
+    queryFn: () => loadDiscussionsWithAuthors(),
+  });
+
+  // Safely unwrap whether loadDiscussionsWithAuthors returns an array or a paginated page object
+  const posts: Post[] = useMemo(() => {
+    if (Array.isArray(discussionsData)) return discussionsData;
+    if (discussionsData && typeof discussionsData === 'object') {
+      const candidate =
+        (discussionsData as any).items ??
+        (discussionsData as any).posts ??
+        (discussionsData as any).data;
+      if (Array.isArray(candidate)) return candidate;
+    }
+    return [];
+  }, [discussionsData]);
+
+  const { data: reviewsData, isPending: isReviewsPending } = useQuery({
+    queryKey: ['reviews'],
+    queryFn: () => loadReviews(),
+  });
+
+  const reviews = useMemo(() => {
+    if (Array.isArray(reviewsData)) return reviewsData;
+    if (reviewsData && typeof reviewsData === 'object') {
+      const candidate =
+        (reviewsData as any).items ??
+        (reviewsData as any).reviews ??
+        (reviewsData as any).data;
+      if (Array.isArray(candidate)) return candidate;
+    }
+    return [];
+  }, [reviewsData]);
+
+  const isFeedPending = isPostsPending || isReviewsPending;
+
+  const postIds = useMemo(() => posts.map((post) => post.id), [posts]);
+  const reviewIds = useMemo(() => reviews.map((review: any) => review.id), [reviews]);
+
+  const { data: metaData } = useQuery({
+    queryKey: ['home-meta', postIds, reviewIds],
+    enabled: postIds.length > 0 || reviewIds.length > 0,
+    queryFn: async () => {
+      const [topics, reviewerProfiles] = await Promise.all([
+        postIds.length > 0 ? loadDiscussionTopics(postIds) : Promise.resolve({} as Record<string, string>),
+        reviewIds.length > 0 ? loadReviewerProfilesForReviews(reviews) : Promise.resolve({} as Record<string, any>),
+      ]);
+      return { topics, reviewerProfiles };
+    },
+  });
+
+  const seminarStats = useMemo(() => {
+    const stats: Record<string, { fresh: number; total: number }> = {};
+    posts.forEach((post) => {
+      if (!post.book_id) return;
+      const entry = (stats[post.book_id] ??= { fresh: 0, total: 0 });
+      entry.total += post.reply_count ?? 0;
+      if (post.user_id !== currentUserId && ts(post.created_at) > lastSeen) entry.fresh += 1;
+    });
+    return stats;
+  }, [posts, currentUserId, lastSeen]);
+
   const readingTreatises = useMemo<ReadingTreatise[]>(() => library
     .filter((entry) => entry.status === 'reading')
     .flatMap((entry) => {
@@ -79,52 +274,88 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
       const progress = book.page_count
         ? Math.min(100, Math.round((entry.pages_read / book.page_count) * 100))
         : 0;
-      const location = entry.pages_read ? `Page ${entry.pages_read}` : 'In progress';
       return [{
         id: book.id,
         title: book.title,
         author: book.author_name,
-        location,
+        pagesRead: entry.pages_read ?? 0,
+        pageCount: book.page_count ?? null,
         progress,
+        cover: (book as Book & { cover_url?: string | null }).cover_url ?? null,
         discussionPrompt: `Discuss ${book.title}`,
-        discussionReplies: 0,
+        discussionReplies: seminarStats[book.id]?.total ?? 0,
+        seminarNew: seminarStats[book.id]?.fresh ?? 0,
       }];
-    }), [library, books]);
-  const { data: recentInsights = [], isPending: areInsightsPending } = useQuery({
-    queryKey: ['home-insights'],
-    queryFn: async (): Promise<HomeInsight[]> => {
-      const [posts, replies, reviews] = await Promise.all([
-        loadDiscussionsWithAuthors(),
-        loadAllReplies(),
-        loadReviews(),
-      ]);
-      const [topics, reviewerProfiles] = await Promise.all([
-        loadDiscussionTopics(posts.map((post) => post.id)),
-        loadReviewerProfilesForReviews(reviews),
-      ]);
-      const discussionInsights: HomeInsight[] = posts.map((post) => ({
-        id: post.id,
-        kind: 'discussion',
-        title: post.title || post.content,
-        meta: `${topics[post.id] || 'Discussion'} · ${replies.filter((reply) => reply.parent_id === post.id).length} replies`,
-        createdAt: post.created_at,
-      }));
-      const reviewInsights: HomeInsight[] = reviews.map((review: Review) => {
-        const reviewer = reviewerProfiles[review.user_id];
-        const bookTitle = books.find((book) => book.id === review.book_id)?.title;
-        return {
-          id: review.id,
-          kind: 'review',
-          title: review.title || (bookTitle ? `Review: ${bookTitle}` : review.content),
-          meta: `★ ${review.rating}/5 · ${reviewer?.name || 'Reader'}`,
-          createdAt: review.created_at,
-        };
+    }), [library, books, seminarStats]);
+
+  const { feedItems, isTrending } = useMemo(() => {
+    const topics = metaData?.topics ?? {};
+    const reviewerProfiles = metaData?.reviewerProfiles ?? {};
+    const normalPosts = posts.filter((post) => !post.book_id);
+    const base = (post: Post) => post.title || post.content;
+
+    const personal: FeedItem[] = [];
+    if (currentUserId) {
+      normalPosts.forEach((post) => {
+        if (post.user_id !== currentUserId) return;
+        const latest = ts(post.created_at);
+        personal.push({
+          key: `d-${post.id}`,
+          kind: 'discussion',
+          id: post.id,
+          tag: 'You asked',
+          highlight: false,
+          title: base(post),
+          meta: `${topics[post.id] || 'Discussion'} · ${timeAgo(latest)}`,
+          count: formatReplyCount(post.reply_count ?? 0),
+          priority: 2,
+          activityAt: latest,
+        });
       });
-      return [...discussionInsights, ...reviewInsights]
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 5);
-    },
-  });
+    }
+
+    if (personal.length) {
+      personal.sort((a, b) => b.activityAt - a.activityAt);
+      return { feedItems: personal.slice(0, 4), isTrending: false };
+    }
+
+    const trending: FeedItem[] = [...normalPosts]
+      .sort((a, b) => (b.reply_count ?? 0) - (a.reply_count ?? 0) || ts(b.created_at) - ts(a.created_at))
+      .slice(0, 3)
+      .map((post) => ({
+        key: `d-${post.id}`,
+        kind: 'discussion' as const,
+        id: post.id,
+        tag: topics[post.id] || 'Discussion',
+        highlight: false,
+        title: base(post),
+        meta: timeAgo(ts(post.created_at)),
+        count: formatReplyCount(post.reply_count ?? 0),
+        priority: 0,
+        activityAt: ts(post.created_at),
+      }));
+
+    const latestReview = [...reviews].sort((a: any, b: any) => ts(b.created_at) - ts(a.created_at))[0];
+    if (latestReview) {
+      const reviewer = reviewerProfiles[latestReview.user_id];
+      const bookTitle = books.find((book) => book.id === latestReview.book_id)?.title;
+      trending.push({
+        key: `r-${latestReview.id}`,
+        kind: 'review',
+        id: latestReview.id,
+        tag: `Review · ★ ${latestReview.rating}/5`,
+        highlight: false,
+        title: latestReview.title || (bookTitle ? `Review: ${bookTitle}` : latestReview.content),
+        meta: `${reviewer?.name || 'Reader'} · ${timeAgo(ts(latestReview.created_at))}`,
+        count: '',
+        priority: 0,
+        activityAt: ts(latestReview.created_at),
+      });
+    }
+
+    return { feedItems: trending, isTrending: true };
+  }, [posts, reviews, metaData, books, currentUserId]);
+
   const readingLogMutation = useMutation({
     mutationFn: (values: { bookId: string; pagesRead: number }) => {
       const row = library.find((entry) => entry.book_id === values.bookId);
@@ -152,11 +383,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
   const [loggerPagesRead, setLoggerPagesRead] = useState(12);
 
   // Write Notes Modal State
-  const [activeNotesBook, setActiveNotesBook] = useState<{
-    id: string;
-    title: string;
-    location: string;
-  } | null>(null);
+  const [activeNotesBook, setActiveNotesBook] = useState<{ id: string; title: string; location: string } | null>(null);
   const [newNoteTitle, setNewNoteTitle] = useState('');
   const [newNoteText, setNewNoteText] = useState('');
 
@@ -169,7 +396,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
     repliesCount: number;
   } | null>(null);
 
-  // Save note mutation (persists to Supabase via createNote)
   const saveNoteMutation = useMutation({
     mutationFn: (values: { bookId: string; title: string; content: string }) => {
       if (!currentUserId) throw new Error('Not signed in');
@@ -186,7 +412,6 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
     onError: () => onShowToast?.('Could not save note'),
   });
 
-  // Handlers
   const handleSaveReadingLog = (e: React.FormEvent) => {
     e.preventDefault();
     const pages = Number(loggerPagesRead) || 0;
@@ -207,465 +432,407 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
       onShowToast?.('Sign in to save notes');
       return;
     }
-    saveNoteMutation.mutate({
-      bookId: activeNotesBook.id,
-      title: newNoteTitle,
-      content: newNoteText,
-    });
+    saveNoteMutation.mutate({ bookId: activeNotesBook.id, title: newNoteTitle, content: newNoteText });
   };
+
+  const openFeedItem = (item: FeedItem) => {
+    if (item.kind === 'review') {
+      if (onNavigateToReview) onNavigateToReview(item.id);
+      else onNavigate('reviews');
+    } else if (onNavigateToDiscussion) onNavigateToDiscussion(item.id);
+    else onNavigate('discussions');
+  };
+
+  const firstName = user.name?.split(' ')[0] ?? '';
+  const hour = new Date().getHours();
+  const greeting = isAmharic
+    ? `ሰላም, ${firstName}`
+    : `${hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}, ${firstName}`;
+  const hasReading = readingTreatises.length > 0;
 
   return (
     <div
       id="sanctuary-home-screen"
-      className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200 selection:bg-theme-accent-light selection:text-theme-accent font-sans antialiased"
+      className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-24 md:pb-14 transition-colors duration-200 selection:bg-theme-accent-light selection:text-theme-accent font-sans antialiased"
     >
-      <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex-1 flex flex-col gap-8">
-        {/* ========================================================================= */}
-        {/* 1. THE ARCHIVAL HEADER & READING STREAK                                   */}
-        {/* ========================================================================= */}
-        <header id="archival-header" className="select-none">
-          <div className="flex items-baseline justify-between border-b border-theme/40 pb-3 lg:pb-4">
-            <div>
-              <h1 className="font-serif font-light text-xl sm:text-2xl lg:text-3xl tracking-[0.24em] text-theme-main uppercase">
-                {isAmharic ? 'ሶፊያ' : 'SOPHIA'}
-              </h1>
-              <p className="text-[10px] lg:text-xs font-sans uppercase tracking-[0.25em] text-theme-muted mt-1">
-                {isAmharic ? 'የመንፈስ ማረፊያ • መነሻ' : 'Reading Desk • Home'}
-              </p>
-            </div>
-            <span className="text-[11px] lg:text-xs font-serif italic text-theme-muted hidden sm:inline">
-              {isAmharic ? 'እምነት ማስተዋልን ይሻል (Faith seeking understanding)' : 'Faith seeking understanding'}
-            </span>
+      <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-8 pb-10 flex-1 flex flex-col gap-9">
+        {/* DESK GREETING HEADER (gold rule) */}
+        <header id="archival-header" className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 pb-4 border-b-2 border-theme-highlight select-none">
+          <div>
+            <p className="text-[13px] font-sans font-semibold uppercase tracking-[0.12em] text-theme-muted mb-1">
+              {isAmharic ? 'የመንፈስ ማረፊያ • መነሻ' : 'Reading Desk • Home'}
+            </p>
+            <h1 className="font-serif text-3xl sm:text-4xl font-medium text-theme-main leading-tight">
+              {greeting}
+            </h1>
           </div>
-
-          {/* Reading Actions */}
-          <div className="mt-3 lg:mt-4 flex items-center justify-between flex-wrap gap-2 text-xs lg:text-sm font-sans text-theme-muted">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setLoggerBook(readingTreatises[0]?.id ?? '');
-                  setIsLoggerModalOpen(true);
-                }}
-                disabled={readingTreatises.length === 0}
-                className="px-3 lg:px-3.5 py-1 lg:py-1.5 rounded-full bg-theme-accent text-white text-xs lg:text-sm font-serif font-medium hover:bg-theme-accent/90 inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
-              >
-                <span className="material-symbols-outlined text-[15px] lg:text-[17px]">add</span>
-                <span>{isAmharic ? 'ንባብ መዝግብ' : 'Log Reading'}</span>
-              </button>
-            </div>
-          </div>
+          <span className="text-base font-serif italic text-theme-muted">
+            {isAmharic ? 'እምነት ማስተዋልን ይሻል (Faith seeking understanding)' : 'Faith seeking understanding'}
+          </span>
         </header>
 
-        {/* ========================================================================= */}
-        {/* 3. CURRENTLY READING SECTION                                              */}
-        {/* ========================================================================= */}
-        <section
-          id="home-currently-reading"
-          aria-label="Currently Reading Treatises"
-          className="space-y-4 lg:space-y-5"
-        >
-          <div className="flex items-center gap-3">
-            <h2 className="text-[11px] lg:text-xs font-sans font-semibold uppercase tracking-[0.25em] text-theme-muted whitespace-nowrap">
-              {isAmharic ? 'በማንበብ ላይ ያሉ' : 'CURRENTLY READING'}
-            </h2>
-            <div className="h-px bg-theme w-full flex-1" />
-          </div>
+        {/* READING + PATH */}
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-stretch">
+          <section id="home-currently-reading" aria-label="Currently Reading" className="flex flex-col gap-2.5">
+            <h2 className={SECTION_LABEL}>{isAmharic ? 'በማንበብ ላይ ያሉ' : 'CURRENTLY READING'}</h2>
 
-          <div className="space-y-3.5 lg:space-y-4">
             {currentUserId && isLibraryPending ? (
               <p className="py-8 text-center text-sm text-theme-muted">Loading your reading list...</p>
-            ) : readingTreatises.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-theme p-6 text-center text-sm text-theme-muted">
-                <p>You have no books marked as currently reading.</p>
-                <button type="button" onClick={() => onNavigate('library')} className="mt-3 text-theme-accent hover:underline">Browse your library</button>
+            ) : !hasReading ? (
+              <div className="bg-theme-surface border border-theme rounded-2xl p-6 flex-1 flex flex-col justify-between gap-4">
+                <div>
+                  <h3 className="font-serif text-2xl font-semibold text-theme-main">Start your first book</h3>
+                  <p className="text-sm text-theme-body mt-1 leading-relaxed">Pick any book from the library. It will appear here with your progress, notes and discussions.</p>
+                </div>
+                <div>
+                  <button type="button" onClick={() => onNavigate('library')} className={BTN_PRIMARY}>
+                    <span>Browse library</span>
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span>
+                  </button>
+                </div>
               </div>
-            ) : readingTreatises.map((item) => (
-              <article
-                key={item.id}
-                id={`reading-treatise-${item.id}`}
-                onClick={() => handleOpenBookDetail(item)}
-                className="bg-theme-surface border border-theme rounded-xl p-4 sm:p-5 lg:p-6 shadow-xs space-y-3 lg:space-y-4 transition-colors hover:border-theme-accent/50 group cursor-pointer"
-              >
-                <div className="flex items-start justify-between gap-4">
+            ) : readingTreatises.map((item) => {
+              const progressLabel = item.pagesRead > 0
+                ? (item.pageCount ? `Page ${item.pagesRead} of ${item.pageCount}` : `Page ${item.pagesRead}`)
+                : 'Not started';
+              const locationSub = item.pagesRead > 0 ? `Page ${item.pagesRead}` : 'In progress';
+
+              return (
+                <article
+                  key={item.id}
+                  id={`reading-treatise-${item.id}`}
+                  onClick={() => handleOpenBookDetail(item)}
+                  className="bg-theme-surface border border-theme rounded-2xl p-5 flex gap-5 transition-colors hover:border-theme-strong cursor-pointer flex-1"
+                >
+                  <BookCover title={item.title} src={item.cover} className="w-24 sm:w-28 flex-none self-start" />
+                  <div className="flex-1 min-w-0 flex flex-col justify-between gap-3">
+                    <div>
+                      <h3 className="font-serif text-xl sm:text-2xl font-semibold text-theme-main leading-snug truncate">
+                        {item.title}
+                      </h3>
+                      <p className="text-sm text-theme-muted font-sans mt-0.5 truncate">{item.author}</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-baseline text-sm font-sans">
+                        <span className="text-theme-body">{progressLabel}</span>
+                        <span className="font-semibold text-theme-main">{item.progress}%</span>
+                      </div>
+                      <div
+                        role="progressbar"
+                        aria-valuenow={item.progress}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`Reading progress for ${item.title}`}
+                        className="h-2 w-full bg-theme-subtle rounded-full overflow-hidden"
+                      >
+                        <div className="h-full bg-theme-highlight transition-all duration-300 rounded-full" style={{ width: `${item.progress}%` }} />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 flex-wrap pt-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLoggerBook(item.id);
+                          setIsLoggerModalOpen(true);
+                        }}
+                        className={BTN_PRIMARY}
+                      >
+                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">menu_book</span>
+                        <span>Log reading</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveNotesBook({ id: item.id, title: item.title, location: locationSub });
+                          setNewNoteTitle('');
+                          setNewNoteText('');
+                        }}
+                        className={BTN_SECONDARY}
+                      >
+                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">edit_note</span>
+                        <span>Write note</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveDiscussionBook({
+                            id: item.id,
+                            title: item.title,
+                            location: locationSub,
+                            prompt: item.discussionPrompt,
+                            repliesCount: item.discussionReplies,
+                          });
+                        }}
+                        className={BTN_SECONDARY}
+                      >
+                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">forum</span>
+                        <span>Discuss</span>
+                        {item.seminarNew > 0 && (
+                          <span
+                            aria-label={`${item.seminarNew} new in this seminar`}
+                            className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-theme-primary text-theme-on-primary text-[13px] font-sans font-bold inline-flex items-center justify-center"
+                          >
+                            {item.seminarNew > 99 ? '99+' : item.seminarNew}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+
+          {/* YOUR PATH */}
+          <section aria-label="Your path" className="flex flex-col gap-2.5">
+            <h2 className={SECTION_LABEL}>{isAmharic ? 'መንገድዎ' : 'YOUR PATH'}</h2>
+            <div className="bg-theme-subtle border border-theme rounded-2xl p-6 flex-1 flex flex-col justify-between gap-4">
+              {activePath ? (
+                <>
                   <div>
-                    <h3
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenBookDetail(item);
-                      }}
-                      className="font-serif text-base sm:text-lg lg:text-xl font-semibold text-theme-main hover:text-theme-accent cursor-pointer transition-colors inline-block leading-snug"
-                      title={`View details for ${item.title}`}
-                    >
-                      {item.title}
-                    </h3>
-                    <p className="text-xs lg:text-sm text-theme-muted font-serif mt-0.5">
-                      {item.author} • {item.location}
+                    <h3 className="font-serif text-xl sm:text-2xl font-semibold text-theme-main">{activePath.title}</h3>
+                    <p className="text-sm text-theme-muted mt-0.5">
+                      {activePath.steps.filter((s) => s.status === 'done').length} of {activePath.steps.length} books complete
                     </p>
                   </div>
-                  <span className="text-xs lg:text-sm font-serif font-semibold text-theme-accent bg-theme-subtle px-2.5 lg:px-3 py-0.5 lg:py-1 rounded-full border border-theme flex-shrink-0">
-                    {item.progress}% Complete
-                  </span>
+                  <ol className="relative flex flex-col gap-2.5">
+                    <span aria-hidden="true" className="absolute left-[9px] top-2.5 bottom-2.5 w-px bg-theme-strong" />
+                    {activePath.steps.map((step) => (
+                      <li key={step.id} className="relative flex items-center gap-3">
+                        <span
+                          className={`w-5 h-5 rounded-full flex-none flex items-center justify-center border ${
+                            step.status === 'done'
+                              ? 'bg-theme-highlight border-theme-highlight text-theme-on-primary'
+                              : step.status === 'current'
+                                ? 'bg-theme-surface border-2 border-theme-highlight'
+                                : 'bg-theme-surface border-theme-strong'
+                          }`}
+                        >
+                          {step.status === 'done' && <span className="material-symbols-outlined text-[13px] font-bold" aria-hidden="true">check</span>}
+                        </span>
+                        <span className={`text-sm font-sans truncate ${step.status === 'current' ? 'text-theme-main font-semibold' : 'text-theme-body'}`}>
+                          {step.title}
+                        </span>
+                        {step.status === 'current' && (
+                          <span className="text-[13px] font-sans font-semibold px-2 py-0.5 rounded-full bg-theme-surface text-theme-main flex-none">Up next</span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              ) : (
+                <div>
+                  <h3 className="font-serif text-2xl font-semibold text-theme-main">Pick a path</h3>
+                  <p className="text-sm text-theme-body mt-1 leading-relaxed">
+                    A path orders books by difficulty and tells you what to read next.
+                  </p>
                 </div>
-
-                {/* Progress bar */}
-                <div className="space-y-1">
-                  <div className="h-1.5 lg:h-2 w-full bg-theme-muted/50 rounded-full overflow-hidden flex">
-                    <div
-                      className="h-full bg-theme-accent transition-all duration-300"
-                      style={{ width: `${item.progress}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex items-center gap-2.5 pt-1 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveNotesBook({
-                        id: item.id,
-                        title: item.title,
-                        location: item.location
-                      });
-                      setNewNoteTitle('');
-                      setNewNoteText('');
-                    }}
-                    className="px-3 lg:px-3.5 py-1.5 lg:py-2 rounded-lg border border-theme bg-theme-surface hover:bg-theme-subtle text-theme-main text-xs lg:text-sm font-serif font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                  >
-                    <span className="material-symbols-outlined text-[15px] lg:text-[17px] text-theme-accent">edit_note</span>
-                    <span>Write Notes</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveDiscussionBook({
-                        id: item.id,
-                        title: item.title,
-                        location: item.location,
-                        prompt: item.discussionPrompt,
-                        repliesCount: item.discussionReplies
-                      });
-                    }}
-                    className="px-3 lg:px-3.5 py-1.5 lg:py-2 rounded-lg border border-theme bg-theme-surface hover:bg-theme-subtle text-theme-muted hover:text-theme-main text-xs lg:text-sm font-serif font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                  >
-                    <span className="material-symbols-outlined text-[15px] lg:text-[17px]">forum</span>
-                    <span>Discussion Feed</span>
-                  </button>
-
-                  <button
+              )}
+              <div>
+                <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setLoggerBook(item.id);
-                    setIsLoggerModalOpen(true);
-                  }}
-                  className="px-3 lg:px-3.5 py-1.5 lg:py-2 rounded-lg border border-theme-accent/30 bg-theme-accent-light text-theme-accent hover:bg-theme-accent/15 text-xs lg:text-sm font-serif font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs ml-auto"
+                  onClick={() => onNavigate('paths' as ScreenId)}
+                  className={BTN_SECONDARY}
                 >
-                  <span className="material-symbols-outlined text-[15px] lg:text-[17px]">menu_book</span>
-                  <span>Log Reading</span>
+                  <span>{activePath ? 'View full path' : 'Browse paths'}</span>
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span>
                 </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
+              </div>
+            </div>
+          </section>
+        </div>
 
-        {/* ========================================================================= */}
-        {/* 4. THE JOURNAL COLLOQUIUM FEED (Recent Insights)                          */}
-        {/* ========================================================================= */}
-        <section
-          id="journal-colloquium-feed"
-          aria-label="Recent Insights Feed"
-          className="pt-2"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[11px] lg:text-xs font-sans font-medium uppercase tracking-[0.25em] text-theme-muted">
-              {isAmharic ? 'የቅርብ ጊዜ ግንዛቤዎች' : 'RECENT INSIGHTS'}
-            </h2>
+        {/* YOUR FEED */}
+        <section id="journal-colloquium-feed" aria-label="Your Feed" className="space-y-3">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <h2 className={SECTION_LABEL}>
+                {isTrending ? (isAmharic ? 'በማህበረሰቡ ውስጥ ተወዳጅ' : 'TRENDING INSIGHTS') : (isAmharic ? 'የእርስዎ ምግብ' : 'YOUR FEED')}
+              </h2>
+              <p className="text-sm text-theme-muted mt-0.5">
+                {isTrending ? 'Most active discussions and reviews right now' : 'Replies, mentions and threads you are part of'}
+              </p>
+            </div>
             <button
               type="button"
               onClick={() => onNavigate('discussions')}
-              className="text-[11px] lg:text-xs font-sans text-theme-muted hover:text-theme-main transition-colors cursor-pointer"
+              className={`text-sm font-sans font-semibold text-theme-accent hover:underline cursor-pointer inline-flex items-center gap-1 min-h-[44px] ${FOCUS}`}
             >
-              {isAmharic ? 'ሁሉንም ውይይቶች እይ' : 'All Discussions'}
+              <span>{isAmharic ? 'ሁሉንም ውይይቶች እይ' : 'All discussions'}</span>
+              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span>
             </button>
           </div>
-          <div className="divide-y divide-theme border-t border-b border-theme">
-            {areInsightsPending ? (
-              <p className="py-6 text-center text-sm text-theme-muted">Loading recent insights...</p>
-            ) : recentInsights.length === 0 ? (
-              <p className="py-6 text-center text-sm text-theme-muted">No recent discussions or reviews yet.</p>
-            ) : recentInsights.map((insight) => (
+
+          <div className="flex flex-col gap-3">
+            {isFeedPending ? (
+              <p className="py-6 text-center text-sm text-theme-muted">Loading your feed...</p>
+            ) : feedItems.length === 0 ? (
+              <p className="py-6 text-center text-sm text-theme-muted">No discussions or reviews yet.</p>
+            ) : feedItems.map((item) => (
               <article
-                key={`${insight.kind}-${insight.id}`}
-                onClick={() => {
-                  if (insight.kind === 'review') {
-                    if (onNavigateToReview) onNavigateToReview(insight.id);
-                    else onNavigate('reviews');
-                  } else if (onNavigateToDiscussion) onNavigateToDiscussion(insight.id);
-                  else onNavigate('discussions');
+                key={item.key}
+                role="link"
+                tabIndex={0}
+                onClick={() => openFeedItem(item)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') openFeedItem(item);
                 }}
-                className="py-4 lg:py-5 px-2 lg:px-3 hover:bg-theme-subtle/70 rounded-lg transition-colors cursor-pointer group flex items-center justify-between gap-3"
+                className={`bg-theme-surface border border-theme rounded-[14px] px-5 py-4 hover:border-theme-strong transition-colors cursor-pointer group flex items-center gap-3 ${FOCUS}`}
               >
-                <div className="min-w-0">
-                  <h3 className="font-serif font-bold text-[15px] sm:text-base lg:text-lg xl:text-xl text-theme-main group-hover:text-theme-accent leading-snug transition-colors line-clamp-2">
-                    {insight.title}
+                {item.highlight && (
+                  <span aria-hidden="true" className="w-2.5 h-2.5 rounded-full flex-none bg-theme-highlight" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-serif font-semibold text-lg sm:text-xl text-theme-main group-hover:text-theme-accent leading-snug transition-colors line-clamp-2">
+                    {item.title}
                   </h3>
-                  <p className="mt-1.5 text-xs lg:text-sm text-theme-muted font-sans font-normal tracking-tight">
-                    {insight.kind === 'review' ? 'Review' : 'Discussion'} - {insight.meta}
-                  </p>
+                  <div className="mt-1.5 flex items-center gap-2.5 flex-wrap text-sm text-theme-muted font-sans">
+                    <span
+                      className={`inline-block text-[13px] font-semibold px-2.5 py-0.5 rounded-full ${
+                        item.highlight ? 'bg-theme-primary text-theme-on-primary' : 'bg-theme-subtle text-theme-main border border-theme'
+                      }`}
+                    >
+                      {item.tag}
+                    </span>
+                    <span>{item.meta}</span>
+                  </div>
                 </div>
-                <span className="material-symbols-outlined text-theme-subtle group-hover:text-theme-accent group-hover:translate-x-0.5 transition-all text-[18px] sm:text-[20px] flex-shrink-0">
-                  arrow_forward
-                </span>
+                {item.count && (
+                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-theme-body font-sans whitespace-nowrap">
+                    <span className="material-symbols-outlined text-[18px] text-theme-muted" aria-hidden="true">forum</span>
+                    {item.count}
+                  </span>
+                )}
               </article>
             ))}
           </div>
         </section>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 5. MODAL: LOG READING & UPDATE CHAPTER                                    */}
-      {/* ========================================================================= */}
+      {/* MODAL: LOG READING */}
       {isLoggerModalOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={() => setIsLoggerModalOpen(false)}
+        <ModalShell
+          as="form"
+          onSubmit={handleSaveReadingLog}
+          label="DAILY STUDY LOG"
+          heading="Record Pages Read"
+          onClose={() => setIsLoggerModalOpen(false)}
+          footer={
+            <>
+              <button type="button" onClick={() => setIsLoggerModalOpen(false)} className={GHOST_BTN}>Cancel</button>
+              <button type="submit" className={DARK_BTN}>Save progress</button>
+            </>
+          }
         >
-          <form
-            onSubmit={handleSaveReadingLog}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"
-          >
-            <div className="flex items-start justify-between border-b border-theme pb-3">
-              <div>
-                <span className="text-[10px] font-sans uppercase tracking-[0.25em] text-theme-muted block">
-                  DAILY STUDY LOG
-                </span>
-                <h3 className="font-serif font-bold text-base text-theme-main mt-0.5">
-                  Record Pages Read
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsLoggerModalOpen(false)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                aria-label="Close dialog"
+          <div className="space-y-3 text-sm">
+            <div>
+              <label htmlFor="logger-book" className="block text-[13px] font-sans text-theme-muted mb-1">Select treatise</label>
+              <select
+                id="logger-book"
+                value={loggerBook}
+                onChange={(e) => setLoggerBook(e.target.value)}
+                className="w-full min-h-[44px] bg-theme-app border border-theme-strong rounded-[10px] px-3 font-sans text-theme-main focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40"
               >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
+                {readingTreatises.map((item) => (
+                  <option key={item.id} value={item.id}>{item.title} ({item.author})</option>
+                ))}
+              </select>
             </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-[11px] font-sans text-theme-muted mb-1">Select Treatise:</label>
-                <select
-                  value={loggerBook}
-                  onChange={(e) => {
-                    setLoggerBook(e.target.value);
-                  }}
-                  className="w-full bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main focus:outline-none focus:border-theme-accent"
-                >
-                  {readingTreatises.map((item) => (
-                    <option key={item.id} value={item.id}>{item.title} ({item.author})</option>
-                  ))}
-                </select>
+            <div>
+              <label htmlFor="logger-pages" className="block text-[13px] font-sans text-theme-muted mb-1">Pages read today</label>
+              <div className="flex items-center gap-3">
+                <input
+                  id="logger-pages"
+                  type="number"
+                  min={1}
+                  max={150}
+                  value={loggerPagesRead}
+                  onChange={(e) => setLoggerPagesRead(Number(e.target.value))}
+                  className="w-24 min-h-[44px] bg-theme-app border border-theme-strong rounded-[10px] px-3 font-sans text-theme-main text-center focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40"
+                  required
+                />
+                <span className="text-sm text-theme-muted font-sans">pages read in contemplative silence</span>
               </div>
-
-              <div>
-                <label className="block text-[11px] font-sans text-theme-muted mb-1">
-                  Pages Read Today:
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number"
-                    min={1}
-                    max={150}
-                    value={loggerPagesRead}
-                    onChange={(e) => setLoggerPagesRead(Number(e.target.value))}
-                    className="w-24 bg-theme-app border border-theme rounded-lg p-2.5 font-serif text-theme-main text-center focus:outline-none focus:border-theme-accent"
-                    required
-                  />
-                  <span className="text-xs text-theme-muted font-serif italic">
-                    pages read in contemplative silence
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-theme flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsLoggerModalOpen(false)}
-                className="px-4 py-2 text-xs font-serif text-theme-muted hover:text-theme-main cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 text-xs font-serif tracking-wide hover:bg-stone-700 dark:hover:bg-stone-600 transition-colors shadow-xs cursor-pointer"
-              >
-                Save Progress
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 6. MODAL: WRITE NOTES (was missing)                                       */}
-      {/* ========================================================================= */}
-      {activeNotesBook && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={() => setActiveNotesBook(null)}
-        >
-          <div
-            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between border-b border-theme pb-3">
-              <div>
-                <span className="text-[10px] font-sans uppercase tracking-[0.25em] text-theme-muted block">
-                  MARGINAL NOTE
-                </span>
-                <h3 className="font-serif font-bold text-base text-theme-main mt-0.5">
-                  {activeNotesBook.title}
-                </h3>
-                <p className="text-xs text-theme-muted font-serif italic">
-                  {activeNotesBook.location}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveNotesBook(null)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                aria-label="Close dialog"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
-
-            <input
-              type="text"
-              value={newNoteTitle}
-              onChange={(e) => setNewNoteTitle(e.target.value)}
-              placeholder="Title (optional)"
-              className="w-full bg-theme-app border border-theme rounded-lg p-2.5 text-sm font-serif text-theme-main focus:outline-none focus:border-theme-accent"
-            />
-
-            <textarea
-              autoFocus
-              value={newNoteText}
-              onChange={(e) => setNewNoteText(e.target.value)}
-              rows={6}
-              placeholder="Write your reflection or marginal note..."
-              className="w-full bg-theme-app border border-theme rounded-lg p-3 text-sm font-serif text-theme-main focus:outline-none focus:border-theme-accent resize-none"
-            />
-
-            <div className="pt-2 border-t border-theme flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveNotesBook(null)}
-                className="px-4 py-2 text-xs font-serif text-theme-muted hover:text-theme-main cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveNote}
-                disabled={!newNoteText.trim() || saveNoteMutation.isPending}
-                className="px-4 py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 text-xs font-serif tracking-wide hover:bg-stone-700 dark:hover:bg-stone-600 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-              >
-                {saveNoteMutation.isPending ? 'Saving...' : 'Save Note'}
-              </button>
             </div>
           </div>
-        </div>
+        </ModalShell>
       )}
 
-      {/* Discussion Modal */}
-      {activeDiscussionBook && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={() => setActiveDiscussionBook(null)}
+      {/* MODAL: WRITE NOTES */}
+      {activeNotesBook && (
+        <ModalShell
+          label="MARGINAL NOTE"
+          heading={activeNotesBook.title}
+          sub={activeNotesBook.location}
+          onClose={() => setActiveNotesBook(null)}
+          footer={
+            <>
+              <button type="button" onClick={() => setActiveNotesBook(null)} className={GHOST_BTN}>Cancel</button>
+              <button type="button" onClick={handleSaveNote} disabled={!newNoteText.trim() || saveNoteMutation.isPending} className={DARK_BTN}>
+                {saveNoteMutation.isPending ? 'Saving...' : 'Save note'}
+              </button>
+            </>
+          }
         >
-          <div
-            className="w-full max-w-md bg-theme-surface text-theme-main rounded-2xl border border-theme p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between border-b border-theme pb-3">
-              <div>
-                <span className="text-[10px] font-sans uppercase tracking-[0.25em] text-theme-muted block">
-                  COLLOQUIUM DISCUSSION
-                </span>
-                <h3 className="font-serif font-bold text-base text-theme-main mt-0.5">
-                  {activeDiscussionBook.title}
-                </h3>
-                <p className="text-xs text-theme-muted font-serif italic">
-                  {activeDiscussionBook.location}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveDiscussionBook(null)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                aria-label="Close dialog"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
+          <input
+            type="text"
+            aria-label="Note title"
+            value={newNoteTitle}
+            onChange={(e) => setNewNoteTitle(e.target.value)}
+            placeholder="Title (optional)"
+            className="w-full min-h-[44px] bg-theme-app border border-theme-strong rounded-[10px] px-3 text-sm font-sans text-theme-main focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40"
+          />
+          <textarea
+            autoFocus
+            aria-label="Note text"
+            value={newNoteText}
+            onChange={(e) => setNewNoteText(e.target.value)}
+            rows={6}
+            placeholder="Write your reflection or marginal note..."
+            className="w-full bg-theme-app border border-theme-strong rounded-[10px] p-3 text-sm font-sans text-theme-main focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40 resize-none"
+          />
+        </ModalShell>
+      )}
 
-            <div className="bg-theme-subtle p-3.5 rounded-xl border border-theme space-y-2">
-              <span className="text-[10px] font-sans uppercase tracking-wider text-theme-accent font-medium block">
-                Active Colloquium Question
-              </span>
-              <p className="text-xs sm:text-sm font-serif text-theme-main leading-relaxed font-normal">
-                {activeDiscussionBook.prompt}
-              </p>
-              <span className="text-[11px] text-theme-muted font-sans block">
-                {activeDiscussionBook.repliesCount} scholarly responses in colloquium
-              </span>
-            </div>
-
-            <div className="pt-2 border-t border-theme flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveDiscussionBook(null)}
-                className="px-4 py-2 text-xs font-serif text-theme-muted hover:text-theme-main cursor-pointer"
-              >
-                Close
-              </button>
+      {/* MODAL: DISCUSSION */}
+      {activeDiscussionBook && (
+        <ModalShell
+          label="COLLOQUIUM DISCUSSION"
+          heading={activeDiscussionBook.title}
+          sub={activeDiscussionBook.location}
+          onClose={() => setActiveDiscussionBook(null)}
+          footer={
+            <>
+              <button type="button" onClick={() => setActiveDiscussionBook(null)} className={GHOST_BTN}>Close</button>
               <button
                 type="button"
                 onClick={() => {
                   const targetId = activeDiscussionBook.id;
                   setActiveDiscussionBook(null);
-                  if (onOpenSeminar) {
-                    onOpenSeminar(targetId);
-                  } else if (onSelectBook) {
-                    onSelectBook(targetId);
-                  } else {
-                    onNavigate('colloquium');
-                  }
+                  if (onOpenSeminar) onOpenSeminar(targetId);
+                  else if (onSelectBook) onSelectBook(targetId);
+                  else onNavigate('colloquium');
                 }}
-                className="px-4 py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 text-xs font-serif tracking-wide hover:bg-stone-700 dark:hover:bg-stone-600 transition-colors shadow-xs cursor-pointer"
+                className={DARK_BTN}
               >
-                Join Seminar →
+                Join seminar →
               </button>
-            </div>
+            </>
+          }
+        >
+          <div className="bg-theme-subtle p-4 rounded-xl border border-theme space-y-2">
+            <span className="text-[13px] font-sans uppercase tracking-[0.12em] text-theme-muted font-semibold block">Active colloquium question</span>
+            <p className="text-base font-serif text-theme-main leading-relaxed">{activeDiscussionBook.prompt}</p>
+            <span className="text-sm text-theme-muted font-sans block">
+              {activeDiscussionBook.repliesCount} scholarly responses in colloquium
+            </span>
           </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );
