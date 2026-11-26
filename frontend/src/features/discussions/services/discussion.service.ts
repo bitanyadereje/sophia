@@ -5,6 +5,9 @@ export type DiscussionPostWithAuthor = DiscussionPost & {
   author?: Pick<Profile, 'name' | 'username' | 'avatar_url'> | null;
 };
 
+export const DISCUSSION_PAGE_SIZE = 20;
+export type DiscussionCursor = Pick<DiscussionPost, 'created_at' | 'id'>;
+
 export interface PostLikeData {
   totalLikes: number;
   isLikedByMe: boolean;
@@ -80,6 +83,22 @@ export const loadDiscussionsWithAuthors = async (): Promise<DiscussionPostWithAu
   return (data ?? []) as DiscussionPostWithAuthor[];
 };
 
+export const loadDiscussionPage = async (cursor?: DiscussionCursor): Promise<DiscussionPostWithAuthor[]> => {
+  let query = supabase
+    .from('discussion_posts')
+    .select(discussionWithAuthor)
+    .is('parent_id', null)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(DISCUSSION_PAGE_SIZE);
+  if (cursor) {
+    query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as DiscussionPostWithAuthor[];
+};
+
 const topicTagSlugs: Record<string, string> = {
   'Early Texts': 'early-texts',
   Philosophy: 'philosophy',
@@ -125,6 +144,19 @@ export const loadDiscussionReplies = async (threadId: string): Promise<Discussio
   return (data ?? []) as DiscussionPostWithAuthor[];
 };
 
+export const loadThreadRepliesWithAuthors = async (threadId: string): Promise<DiscussionPostWithAuthor[]> => {
+  const { data: replies, error } = await supabase.rpc('get_discussion_thread_replies', { thread_id: threadId });
+  if (error) throw error;
+  const rows = (replies ?? []) as DiscussionPost[];
+  const authorIds = [...new Set(rows.map((reply) => reply.author_id).filter(Boolean))] as string[];
+  if (!authorIds.length) return rows;
+  const { data: profiles, error: profileError } = await supabase
+    .from('profiles').select('id, name, username, avatar_url').in('id', authorIds);
+  if (profileError) throw profileError;
+  const authors = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  return rows.map((reply) => ({ ...reply, author: reply.author_id ? authors.get(reply.author_id) ?? null : null }));
+};
+
 export const getPostLikeData = async (postId: string, userId?: string): Promise<PostLikeData> => {
   const { count, error: countError } = await supabase
     .from('post_likes')
@@ -148,6 +180,13 @@ export const loadPostLikes = async (postIds: string[]): Promise<PostLike[]> => {
   const { data, error } = await supabase.from('post_likes').select('*').in('post_id', postIds);
   if (error) throw error;
   return (data ?? []) as PostLike[];
+};
+
+export const loadCurrentUserPostLikes = async (postIds: string[], userId?: string): Promise<Set<string>> => {
+  if (!userId || postIds.length === 0) return new Set();
+  const { data, error } = await supabase.from('post_likes').select('post_id').eq('user_id', userId).in('post_id', postIds);
+  if (error) throw error;
+  return new Set((data ?? []).map((like) => like.post_id));
 };
 
 export const togglePostLike = async (postId: string, userId: string, isLiked: boolean): Promise<void> => {

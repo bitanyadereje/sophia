@@ -141,6 +141,8 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
         status: 'published',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        like_count: 0,
+        comment_count: 0,
       };
       onAddReview(newReview);
     }
