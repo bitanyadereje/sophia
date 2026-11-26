@@ -7,6 +7,7 @@ import { addReviewComment, loadReviewCommentsForReviews } from '../services/revi
 import { loadCurrentUserReviewLikes, toggleReviewLike } from '../services/reviewInteraction.service';
 import { FEED_PAGE_SIZE, loadReviewPage } from '../review.service';
 import { useBookmarks } from '../../saved/useBookmarks';
+import { ReviewCard, StarRating, getBookTradition } from './ReviewCard';
 
 interface ReviewerProfile {
   name?: string | null;
@@ -681,12 +682,18 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   };
 
   const filteredReviews = feedReviews.filter((review) => {
-    if (selectedTradition !== 'All') return false;
+    const book = books.find((item) => item.id === review.book_id);
+
+    if (
+      selectedTradition !== 'All' &&
+      getBookTradition(book).toLocaleLowerCase() !== selectedTradition.toLocaleLowerCase()
+    ) {
+      return false;
+    }
 
     const query = searchQuery.trim().toLocaleLowerCase();
     if (!query) return true;
 
-    const book = books.find((item) => item.id === review.book_id);
     const profile = feedProfiles[review.user_id];
     const reviewerName = getReviewerName(profile);
 
@@ -955,7 +962,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       selectedBookForForm?.author_name || newBookAuthor.trim() || '';
     const previewCover = selectedBookForForm?.cover_url || coverPreview || null;
     const activeRating = hoverRating ?? newRating;
-    const activeBookTitle = selectedBookForForm?.title || (newBookTitle || bookSearch).trim();
 
     // Optional catalog metadata; shown only when the book record has it.
     const bookRecord = selectedBookForForm as unknown as Record<string, any> | undefined;
@@ -1238,165 +1244,165 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                       </div>
                     ) : (
                       <>
-                  {!isAddingNewBook && (
-                    <div className="space-y-2">
-                      <input
-                        type="search"
-                        value={bookSearch}
-                        onChange={(e) => {
-                          setNewBookId('');
-                          setBookSearch(e.target.value);
-                          setNewBookTitle(e.target.value);
-                        }}
-                        placeholder={
-                          isAmharic
-                            ? 'በመጽሐፍ ርዕስ ወይም ደራሲ ፈልግ...'
-                            : 'Search library by title or author...'
-                        }
-                        disabled={Boolean(editingReview)}
-                        className="w-full bg-theme-subtle border border-theme rounded-xl px-3.5 py-2.5 text-sm text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-theme-accent"
-                      />
-
-                      {bookSearch.trim() && (
-                        <div className="max-h-48 overflow-y-auto rounded-xl border border-theme bg-theme-app divide-y divide-theme/50">
-                          {visibleBooks.slice(0, 8).map((bookItem) => (
-                            <button
-                              key={bookItem.id}
-                              type="button"
-                              onClick={() => {
-                                setNewBookId(bookItem.id);
-                                setBookSearch(bookItem.title);
-                                setNewBookTitle('');
-                                setNewBookAuthor('');
-                                setIsAddingNewBook(false);
-                              }}
-                              className="block w-full px-3.5 py-2.5 text-left text-xs hover:bg-theme-subtle transition-colors cursor-pointer"
-                            >
-                              <span className="block font-semibold text-theme-main">
-                                {bookItem.title}
-                              </span>
-                              <span className="text-theme-muted">{bookItem.author_name}</span>
-                            </button>
-                          ))}
-
-                          <button
-                            type="button"
-                            onClick={() => setIsAddingNewBook(true)}
-                            className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-theme-accent hover:bg-theme-subtle flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">add_circle</span>
-                            {isAmharic
-                              ? `“${bookSearch.trim()}” እንደ አዲስ መጽሐፍ ጨምር`
-                              : `Add “${bookSearch.trim()}” as a new volume`}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {!editingReview && (isAddingNewBook || (bookSearch.trim() && visibleBooks.length === 0)) && (
-                    <div className="space-y-3 rounded-xl border border-theme bg-theme-subtle/40 p-3.5">
-                      <p className="text-xs font-semibold text-theme-main">
-                        {isAmharic ? 'አዲስ የመጽሐፍ ዝርዝር' : 'New Volume Details'}
-                      </p>
-
-                      <label className="block text-xs text-theme-muted">
-                        {isAmharic ? 'የመጽሐፍ ርዕስ *' : 'Book title *'}
-                        <input
-                          required
-                          value={newBookTitle || bookSearch}
-                          onChange={(e) => {
-                            setNewBookTitle(e.target.value);
-                            setBookSearch(e.target.value);
-                          }}
-                          className="mt-1 w-full bg-theme-surface border border-theme rounded-lg p-2 text-sm text-theme-main focus:outline-none focus:border-theme-accent"
-                        />
-                      </label>
-
-                      <label className="block text-xs text-theme-muted">
-                        {isAmharic ? 'ደራሲ *' : 'Author *'}
-                        <input
-                          required
-                          value={newBookAuthor}
-                          onChange={(e) => setNewBookAuthor(e.target.value)}
-                          className="mt-1 w-full bg-theme-surface border border-theme rounded-lg p-2 text-sm text-theme-main focus:outline-none focus:border-theme-accent"
-                        />
-                      </label>
-
-                      <div className="grid grid-cols-2 gap-2.5">
-                        <label className="block text-xs text-theme-muted">
-                          {isAmharic ? 'ቋንቋ' : 'Language'}
-                          <select
-                            value={newBookLanguage}
-                            onChange={(e) => setNewBookLanguage(e.target.value)}
-                            className="mt-1 w-full bg-theme-surface border border-theme rounded-lg p-2 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
-                          >
-                            <option value="en">English</option>
-                            <option value="am">Amharic</option>
-                            <option value="gez">Geez</option>
-                            <option value="other">Other</option>
-                          </select>
-                        </label>
-
-                        <label className="block text-xs text-theme-muted">
-                          {isAmharic ? 'ገጾች *' : 'Pages *'}
-                          <input
-                            type="number"
-                            min={1}
-                            step={1}
-                            required
-                            inputMode="numeric"
-                            value={newPageCount}
-                            onChange={(e) => setNewPageCount(e.target.value)}
-                            placeholder="320"
-                            className="mt-1 w-full bg-theme-surface border border-theme rounded-lg p-2 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
-                          />
-                        </label>
-                      </div>
-
-                      <div className="text-xs text-theme-muted">
-                        <span className="block">
-                          {isAmharic ? 'የሽፋን ፎቶ (አማራጭ)' : 'Cover photo (optional)'}
-                        </span>
-
-                        {coverPreview ? (
-                          <div className="mt-2 flex items-end gap-3">
-                            <img
-                              src={coverPreview}
-                              alt="Cover preview"
-                              className="h-24 w-auto rounded object-cover border border-theme"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setNewCoverFile(null)}
-                              className="text-theme-accent hover:underline"
-                            >
-                              {isAmharic ? 'አስወግድ' : 'Remove'}
-                            </button>
-                          </div>
-                        ) : (
-                          <label className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-theme bg-theme-surface p-2.5 hover:border-theme-accent">
-                            <span className="material-symbols-outlined text-[18px]">
-                              add_photo_alternate
-                            </span>
-                            {isAmharic ? 'ፎቶ ይስቀሉ' : 'Upload cover'}
+                        {!isAddingNewBook && (
+                          <div className="space-y-2">
                             <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleCoverFileChange}
-                              className="hidden"
+                              type="search"
+                              value={bookSearch}
+                              onChange={(e) => {
+                                setNewBookId('');
+                                setBookSearch(e.target.value);
+                                setNewBookTitle(e.target.value);
+                              }}
+                              placeholder={
+                                isAmharic
+                                  ? 'በመጽሐፍ ርዕስ ወይም ደራሲ ፈልግ...'
+                                  : 'Search library by title or author...'
+                              }
+                              disabled={Boolean(editingReview)}
+                              className="w-full bg-theme-subtle border border-theme rounded-xl px-3.5 py-2.5 text-sm text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-theme-accent"
                             />
-                          </label>
-                        )}
-                      </div>
 
-                      <p className="text-[11px] text-theme-muted leading-snug">
-                        {isAmharic
-                          ? 'መጽሐፉ ለማረጋገጫ በካታሎጉ ውስጥ ይጨመራል።'
-                          : 'Submitted to the catalog for verification upon publishing.'}
-                      </p>
-                    </div>
-                  )}
+                            {bookSearch.trim() && (
+                              <div className="max-h-48 overflow-y-auto rounded-xl border border-theme bg-theme-app divide-y divide-theme/50">
+                                {visibleBooks.slice(0, 8).map((bookItem) => (
+                                  <button
+                                    key={bookItem.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setNewBookId(bookItem.id);
+                                      setBookSearch(bookItem.title);
+                                      setNewBookTitle('');
+                                      setNewBookAuthor('');
+                                      setIsAddingNewBook(false);
+                                    }}
+                                    className="block w-full px-3.5 py-2.5 text-left text-xs hover:bg-theme-subtle transition-colors cursor-pointer"
+                                  >
+                                    <span className="block font-semibold text-theme-main">
+                                      {bookItem.title}
+                                    </span>
+                                    <span className="text-theme-muted">{bookItem.author_name}</span>
+                                  </button>
+                                ))}
+
+                                <button
+                                  type="button"
+                                  onClick={() => setIsAddingNewBook(true)}
+                                  className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-theme-accent hover:bg-theme-subtle flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <span className="material-symbols-outlined text-[16px]">add_circle</span>
+                                  {isAmharic
+                                    ? `“${bookSearch.trim()}” እንደ አዲስ መጽሐፍ ጨምር`
+                                    : `Add “${bookSearch.trim()}” as a new volume`}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {!editingReview && (isAddingNewBook || (bookSearch.trim() && visibleBooks.length === 0)) && (
+                          <div className="space-y-3 rounded-xl border border-theme bg-theme-subtle/40 p-3.5">
+                            <p className="text-xs font-semibold text-theme-main">
+                              {isAmharic ? 'አዲስ የመጽሐፍ ዝርዝር' : 'New Volume Details'}
+                            </p>
+
+                            <label className="block text-xs text-theme-muted">
+                              {isAmharic ? 'የመጽሐፍ ርዕስ *' : 'Book title *'}
+                              <input
+                                required
+                                value={newBookTitle || bookSearch}
+                                onChange={(e) => {
+                                  setNewBookTitle(e.target.value);
+                                  setBookSearch(e.target.value);
+                                }}
+                                className="mt-1 w-full bg-theme-surface border border-theme rounded-lg p-2 text-sm text-theme-main focus:outline-none focus:border-theme-accent"
+                              />
+                            </label>
+
+                            <label className="block text-xs text-theme-muted">
+                              {isAmharic ? 'ደራሲ *' : 'Author *'}
+                              <input
+                                required
+                                value={newBookAuthor}
+                                onChange={(e) => setNewBookAuthor(e.target.value)}
+                                className="mt-1 w-full bg-theme-surface border border-theme rounded-lg p-2 text-sm text-theme-main focus:outline-none focus:border-theme-accent"
+                              />
+                            </label>
+
+                            <div className="grid grid-cols-2 gap-2.5">
+                              <label className="block text-xs text-theme-muted">
+                                {isAmharic ? 'ቋንቋ' : 'Language'}
+                                <select
+                                  value={newBookLanguage}
+                                  onChange={(e) => setNewBookLanguage(e.target.value)}
+                                  className="mt-1 w-full bg-theme-surface border border-theme rounded-lg p-2 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
+                                >
+                                  <option value="en">English</option>
+                                  <option value="am">Amharic</option>
+                                  <option value="gez">Geez</option>
+                                  <option value="other">Other</option>
+                                </select>
+                              </label>
+
+                              <label className="block text-xs text-theme-muted">
+                                {isAmharic ? 'ገጾች *' : 'Pages *'}
+                                <input
+                                  type="number"
+                                  min={1}
+                                  step={1}
+                                  required
+                                  inputMode="numeric"
+                                  value={newPageCount}
+                                  onChange={(e) => setNewPageCount(e.target.value)}
+                                  placeholder="320"
+                                  className="mt-1 w-full bg-theme-surface border border-theme rounded-lg p-2 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
+                                />
+                              </label>
+                            </div>
+
+                            <div className="text-xs text-theme-muted">
+                              <span className="block">
+                                {isAmharic ? 'የሽፋን ፎቶ (አማራጭ)' : 'Cover photo (optional)'}
+                              </span>
+
+                              {coverPreview ? (
+                                <div className="mt-2 flex items-end gap-3">
+                                  <img
+                                    src={coverPreview}
+                                    alt="Cover preview"
+                                    className="h-24 w-auto rounded object-cover border border-theme"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewCoverFile(null)}
+                                    className="text-theme-accent hover:underline"
+                                  >
+                                    {isAmharic ? 'አስወግድ' : 'Remove'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-theme bg-theme-surface p-2.5 hover:border-theme-accent">
+                                  <span className="material-symbols-outlined text-[18px]">
+                                    add_photo_alternate
+                                  </span>
+                                  {isAmharic ? 'ፎቶ ይስቀሉ' : 'Upload cover'}
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleCoverFileChange}
+                                    className="hidden"
+                                  />
+                                </label>
+                              )}
+                            </div>
+
+                            <p className="text-[11px] text-theme-muted leading-snug">
+                              {isAmharic
+                                ? 'መጽሐፉ ለማረጋገጫ በካታሎጉ ውስጥ ይጨመራል።'
+                                : 'Submitted to the catalog for verification upon publishing.'}
+                            </p>
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -1652,9 +1658,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
           </form>
 
           {/* ===== COMPANION SIDEBAR ===== */}
-          {/* No sticky / max-height / overflow here, so nothing gets clipped. */}
           <aside className="w-full lg:w-80 flex-shrink-0 flex flex-col gap-5">
-            {/* 1. Saved drafts */}
             {!editingReview && (
               <section className={`${cardClass} p-4`}>
                 <div className={`flex items-center justify-between gap-2 ${isDraftsOpen ? 'mb-3' : ''}`}>
@@ -1779,7 +1783,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
               </section>
             )}
 
-            {/* 2. Saved marginalia (notes on the selected volume) */}
             <section className={`${cardClass} overflow-hidden`}>
               <button
                 type="button"
@@ -1887,7 +1890,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
               )}
             </section>
 
-            {/* 3. Writing metrics (now below marginalia) */}
             <section className={`${cardClass} p-4`}>
               <div className="flex items-center justify-between gap-2 mb-3">
                 <h3 className={`${sectionLabelClass} text-theme-muted`}>
@@ -1924,41 +1926,63 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   // =========================================================================
   // COMMUNITY REVIEWS FEED VIEW
   // =========================================================================
+  const bookById = new Map(books.map((book) => [book.id, book]));
+  const hasFilters = Boolean(searchQuery.trim()) || selectedTradition !== 'All';
+
+  const ratingAverage = feedReviews.length
+    ? feedReviews.reduce((sum, review) => sum + Number(review.rating), 0) / feedReviews.length
+    : 0;
+
+  const traditionCount = (tradition: string) =>
+    tradition === 'All'
+      ? feedReviews.length
+      : feedReviews.filter(
+          (review) =>
+            getBookTradition(bookById.get(review.book_id)).toLocaleLowerCase() ===
+            tradition.toLocaleLowerCase()
+        ).length;
+
   return (
     <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
       <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6">
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-theme pb-4">
-          <div>
-            <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main">
+        <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-2">
+          <div className="flex flex-col gap-2">
+            <h1 className="font-serif text-[28px] sm:text-4xl font-bold leading-tight text-theme-main">
               {isAmharic ? 'የአንባቢዎች መጽሐፍ ዳሰሳዎች' : 'Reader Reviews & Reflections'}
             </h1>
             <p className="page-subtitle text-xs sm:text-sm text-theme-muted">
               {isAmharic ? 'የማህበረሰብ መጽሐፍ ዳሰሳዎች' : 'Community book reviews and reflections'}
             </p>
+            {feedReviews.length > 0 && (
+              <div className="flex items-center gap-2 text-sm text-theme-muted">
+                <StarRating rating={ratingAverage} size={16} />
+                <span>
+                  <strong className="text-theme-main">{ratingAverage.toFixed(1)}</strong>{' '}
+                  {isAmharic ? 'አማካይ' : 'average'} · {feedReviews.length}
+                  {hasNextPage ? '+' : ''} {isAmharic ? 'ዳሰሳዎች' : 'reviews'}
+                </span>
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-center">
+          <div className="flex items-center gap-2 self-start sm:self-end">
             {authUserId && drafts.length > 0 && (
               <button
                 type="button"
                 onClick={() => loadDraftIntoEditor(drafts[0])}
                 className="flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2.5 rounded-lg bg-theme-subtle text-theme-main border border-theme hover:border-theme-accent cursor-pointer"
               >
-                <span className="material-symbols-outlined text-[16px] text-theme-accent">
-                  edit_note
-                </span>
-                {isAmharic
-                  ? `ረቂቅ ቀጥል (${drafts.length})`
-                  : `Continue Draft (${drafts.length})`}
+                <span className="material-symbols-outlined text-[16px] text-theme-accent">edit_note</span>
+                {isAmharic ? `ረቂቅ ቀጥል (${drafts.length})` : `Continue Draft (${drafts.length})`}
               </button>
             )}
 
             <button
               type="button"
               onClick={handleOpenNewReview}
-              className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-lg bg-theme-main text-theme-surface hover:opacity-90 cursor-pointer"
+              className="flex items-center gap-1.5 text-sm font-semibold px-5 py-2.5 rounded-xl bg-theme-main text-theme-surface hover:opacity-90 cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[16px]">rate_review</span>
+              <span className="material-symbols-outlined text-[18px]">rate_review</span>
               {isAmharic ? 'መጽሐፍ ዳሰሳ ጻፍ' : 'Write Review'}
             </button>
           </div>
@@ -1999,12 +2023,13 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
           type="search"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          aria-label={isAmharic ? 'ዳሰሳዎችን ፈልግ' : 'Search reviews'}
           placeholder={
             isAmharic
               ? 'በመጽሐፍ፣ ደራሲ ወይም ገምጋሚ ፈልግ...'
               : 'Search by book, author, reviewer, or review...'
           }
-          className="w-full bg-theme-surface border border-theme rounded-full px-4 py-2.5 text-sm text-theme-main placeholder:text-theme-subtle focus:outline-none focus:border-theme-accent"
+          className="w-full bg-theme-surface border border-theme rounded-full px-5 py-3 text-sm text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-theme-accent"
         />
 
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
@@ -2013,13 +2038,15 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
               key={tradition}
               type="button"
               onClick={() => setSelectedTradition(tradition)}
-              className={`text-xs px-3.5 py-1.5 rounded-full whitespace-nowrap ${
+              aria-pressed={selectedTradition === tradition}
+              className={`text-sm px-4 py-2 rounded-full whitespace-nowrap border transition-colors ${
                 selectedTradition === tradition
-                  ? 'bg-theme-main text-theme-surface font-semibold'
-                  : 'bg-theme-subtle text-theme-muted hover:bg-theme-muted'
+                  ? 'bg-theme-main text-theme-surface border-theme-main font-semibold'
+                  : 'bg-theme-surface text-theme-muted border-theme hover:border-theme-accent/60 hover:text-theme-main'
               }`}
             >
-              {tradition === 'All' ? (isAmharic ? 'ሁሉም' : 'All Reviews') : tradition}
+              {tradition === 'All' ? (isAmharic ? 'ሁሉም' : 'All Reviews') : tradition}{' '}
+              <span className="opacity-70 font-normal">{traditionCount(tradition)}</span>
             </button>
           ))}
         </div>
@@ -2027,292 +2054,54 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
         {isPending ? (
           <div className="py-16 text-center text-theme-muted">Loading reviews…</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {filteredReviews.map((review) => {
               const profile = feedProfiles[review.user_id];
-              const reviewerName = getReviewerName(profile);
-              const avatarUrl = profile?.avatar_url || profile?.avatar;
-              const book = books.find((item) => item.id === review.book_id);
-              const comments = commentsByReview[review.id] || [];
-              const isLiked = likedReviewIds.has(review.id);
-              const isCommentOpen = activeCommentId === review.id;
-              const saved = isSaved(review.id);
-
-              const formattedDate = getRelativeDate(review.created_at, isAmharic);
 
               return (
-                <article
+                <ReviewCard
                   key={review.id}
-                  id={`review-${review.id}`}
-                  onClick={() => handleCardClick(review)}
-                  className={`bg-theme-surface rounded-xl p-4 sm:p-5 border flex flex-col justify-between gap-3 cursor-pointer transition-all ${
-                    targetReviewId === review.id
-                      ? 'border-theme-accent ring-2 ring-theme-accent/50 shadow-md'
-                      : 'border-theme shadow-xs hover:border-theme-accent/60 hover:shadow-md'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        {avatarUrl ? (
-                          <img
-                            src={avatarUrl}
-                            alt={`${reviewerName}'s avatar`}
-                            className="w-9 h-9 rounded-full object-cover ring-1 ring-black/10 flex-shrink-0"
-                          />
-                        ) : (
-                          <div
-                            aria-label={`${reviewerName}'s avatar`}
-                            className="w-9 h-9 rounded-full bg-theme-subtle flex items-center justify-center flex-shrink-0"
-                          >
-                            <span className="text-sm font-semibold text-theme-muted">
-                              {reviewerName.charAt(0).toLocaleUpperCase()}
-                            </span>
-                          </div>
-                        )}
-
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm text-theme-main font-semibold truncate">
-                            {reviewerName}
-                          </p>
-                          {profile?.title && (
-                            <p className="text-[11px] text-theme-muted truncate">{profile.title}</p>
-                          )}
-                          {profile?.username && profile?.name && (
-                            <p className="text-[11px] text-theme-muted truncate">
-                              @{profile.username}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                        <div className="flex items-center gap-1.5">
-                          {isAuthor(review) && (
-                            <span className="text-[10px] font-semibold text-theme-accent bg-theme-accent-light border border-theme-accent/30 px-2 py-0.5 rounded-full whitespace-nowrap">
-                              {isAmharic ? 'የእርስዎ ዳሰሳ' : 'Your Review'}
-                            </span>
-                          )}
-
-                          {isAuthor(review) && (
-                            <div className="relative">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setActiveMenuId(activeMenuId === review.id ? null : review.id);
-                                }}
-                                className="w-7 h-7 rounded-md hover:bg-theme-subtle flex items-center justify-center text-theme-muted"
-                                aria-label="Review options"
-                              >
-                                <span className="material-symbols-outlined text-[18px]">
-                                  more_vert
-                                </span>
-                              </button>
-
-                              {activeMenuId === review.id && (
-                                <div
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="absolute right-0 top-7 w-32 bg-theme-surface border border-theme rounded-lg shadow-lg py-1 z-30"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      setActiveMenuId(null);
-                                      handleOpenEditReview(review, e);
-                                    }}
-                                    className="w-full px-3 py-2 text-left text-xs text-theme-main hover:bg-theme-subtle"
-                                  >
-                                    {isAmharic ? 'አስተካክል' : 'Edit'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      setActiveMenuId(null);
-                                      void handleDeleteReview(review.id, e);
-                                    }}
-                                    className="w-full px-3 py-2 text-left text-xs text-red-600 hover:bg-theme-subtle"
-                                  >
-                                    {isAmharic ? 'ሰርዝ' : 'Delete'}
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {formattedDate && (
-                          <time
-                            dateTime={review.created_at}
-                            title={
-                              review.created_at &&
-                              !Number.isNaN(new Date(review.created_at).getTime())
-                                ? new Date(review.created_at).toLocaleString(
-                                    isAmharic ? 'am-ET' : 'en-ET',
-                                    {
-                                      dateStyle: 'medium',
-                                      timeStyle: 'short',
-                                    }
-                                  )
-                                : undefined
-                            }
-                            className="text-[11px] text-theme-muted text-right whitespace-nowrap"
-                          >
-                            {formattedDate}
-                          </time>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="my-3 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <h2 className="font-serif text-[15px] font-bold text-theme-main">
-                          {book?.title || review.title || (isAmharic ? 'መጽሐፍ' : 'Book')}
-                        </h2>
-                        <span className="text-[10px] uppercase tracking-wider text-theme-muted bg-theme-subtle border border-theme/60 px-2 py-0.5 rounded-full flex-shrink-0">
-                          {isAmharic ? 'ዳሰሳ' : 'Review'}
-                        </span>
-                      </div>
-
-                      {book?.author_name && (
-                        <p className="text-xs text-theme-muted font-serif">
-                          {isAmharic ? 'ደራሲ፦ ' : 'By '}
-                          {book.author_name}
-                        </p>
-                      )}
-
-                      <div className="flex items-center gap-1.5 pt-1">
-                        <div className="flex items-center gap-0.5">
-                          {Array.from({ length: 5 }).map((_, i) => (
-                            <span
-                              key={i}
-                              className="material-symbols-outlined text-[14px] text-theme-gold"
-                              style={{
-                                fontVariationSettings:
-                                  i < Math.round(review.rating) ? "'FILL' 1" : "'FILL' 0",
-                              }}
-                            >
-                              star
-                            </span>
-                          ))}
-                        </div>
-                        <span className="text-xs font-semibold text-theme-main">
-                          {Number(review.rating).toFixed(1)} / 5
-                        </span>
-                      </div>
-                    </div>
-
-                    {review.quote?.trim() && (
-                      <blockquote className="font-serif text-sm text-theme-main italic leading-relaxed pl-3.5 border-l-2 border-theme-accent my-3">
-                        “{review.quote}”
-                      </blockquote>
-                    )}
-
-                    <p className="text-sm text-theme-body leading-relaxed whitespace-pre-wrap line-clamp-5">
-                      {review.content}
-                    </p>
-                  </div>
-
-                  <div className="pt-3 border-t border-theme/50">
-                    <div className="flex items-center justify-between gap-2 text-xs text-theme-muted">
-                      <button
-                        type="button"
-                        onClick={(e) => handleToggleLike(review.id, e)}
-                        className="flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle"
-                        title={isAmharic ? 'ውደድ' : 'Like review'}
-                      >
-                        <span
-                          className="material-symbols-outlined text-[16px]"
-                          style={{ fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0" }}
-                        >
-                          favorite
-                        </span>
-                        <span>{review.like_count}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={(e) => handleToggleCommentDrawer(review.id, e)}
-                        className="flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">
-                          chat_bubble_outline
-                        </span>
-                        {review.comment_count > 0
-                          ? `${review.comment_count} ${isAmharic ? 'አስተያየቶች' : 'comments'}`
-                          : isAmharic
-                            ? 'አስተያየት'
-                            : 'Comment'}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={(e) => handleToggleSave(review.id, e)}
-                        className={`flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-theme-subtle ${
-                          saved ? 'text-theme-accent font-semibold' : ''
-                        }`}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">bookmark</span>
-                        {saved
-                          ? isAmharic
-                            ? 'ተቀምጧል'
-                            : 'Saved'
-                          : isAmharic
-                            ? 'አስቀምጥ'
-                            : 'Save'}
-                      </button>
-                    </div>
-
-                    {isCommentOpen && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="mt-3 pt-3 border-t border-theme/70 flex flex-col gap-2"
-                      >
-                        {comments.map((comment) => (
-                          <div key={comment.id} className="bg-theme-subtle rounded-lg p-2 text-xs">
-                            <p className="font-semibold text-theme-main">{comment.author}</p>
-                            <p className="text-theme-body mt-1 whitespace-pre-wrap">
-                              {comment.text}
-                            </p>
-                            <p className="text-[10px] text-theme-muted mt-1">{comment.timeAgo}</p>
-                          </div>
-                        ))}
-
-                        <form
-                          onSubmit={(e) => handleAddComment(review.id, e)}
-                          className="flex items-center gap-2"
-                        >
-                          <input
-                            type="text"
-                            value={commentInputs[review.id] || ''}
-                            onChange={(e) =>
-                              setCommentInputs((prev) => ({
-                                ...prev,
-                                [review.id]: e.target.value,
-                              }))
-                            }
-                            placeholder={isAmharic ? 'አስተያየት ይጻፉ...' : 'Write a comment...'}
-                            className="flex-1 bg-theme-subtle border border-theme rounded-lg px-2.5 py-2 text-xs text-theme-main focus:outline-none focus:border-theme-accent"
-                          />
-                          <button
-                            type="submit"
-                            className="px-3 py-2 rounded-lg bg-theme-main text-theme-surface text-xs font-semibold"
-                          >
-                            {isAmharic ? 'ለጥፍ' : 'Post'}
-                          </button>
-                        </form>
-                      </div>
-                    )}
-                  </div>
-                </article>
+                  review={review}
+                  book={bookById.get(review.book_id)}
+                  profile={profile}
+                  reviewerName={getReviewerName(profile)}
+                  formattedDate={getRelativeDate(review.created_at, isAmharic)}
+                  isAmharic={isAmharic}
+                  isAuthor={isAuthor(review)}
+                  isLiked={likedReviewIds.has(review.id)}
+                  isSaved={isSaved(review.id)}
+                  isHighlighted={targetReviewId === review.id}
+                  isMenuOpen={activeMenuId === review.id}
+                  isCommentOpen={activeCommentId === review.id}
+                  comments={commentsByReview[review.id] || []}
+                  commentValue={commentInputs[review.id] || ''}
+                  onOpen={() => handleCardClick(review)}
+                  onLike={(e) => handleToggleLike(review.id, e)}
+                  onSave={(e) => handleToggleSave(review.id, e)}
+                  onToggleComments={(e) => handleToggleCommentDrawer(review.id, e)}
+                  onToggleMenu={(e) => {
+                    e.stopPropagation();
+                    setActiveMenuId(activeMenuId === review.id ? null : review.id);
+                  }}
+                  onEdit={(e) => {
+                    setActiveMenuId(null);
+                    handleOpenEditReview(review, e);
+                  }}
+                  onDelete={(e) => {
+                    setActiveMenuId(null);
+                    void handleDeleteReview(review.id, e);
+                  }}
+                  onCommentChange={(value) =>
+                    setCommentInputs((prev) => ({ ...prev, [review.id]: value }))
+                  }
+                  onCommentSubmit={(e) => handleAddComment(review.id, e)}
+                />
               );
             })}
 
             {filteredReviews.length === 0 && (
               <div className="col-span-full bg-theme-subtle rounded-xl p-8 text-center border border-theme">
-                <span className="material-symbols-outlined text-3xl text-theme-muted">
-                  rate_review
-                </span>
+                <span className="material-symbols-outlined text-3xl text-theme-muted">rate_review</span>
                 <h3 className="font-serif text-base font-bold text-theme-main mt-2">
                   {isAmharic ? 'ምንም ዳሰሳ አልተገኘም' : 'No reviews found'}
                 </h3>
@@ -2332,10 +2121,16 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
             )}
           </div>
         )}
-        {hasNextPage && !searchQuery && selectedTradition === 'All' && (
+
+        {hasNextPage && !hasFilters && (
           <div className="flex justify-center pt-5">
-            <button type="button" onClick={() => void fetchNextPage()} disabled={isFetchingNextPage} className="px-4 py-2 rounded-lg bg-theme-subtle text-theme-main text-xs font-semibold disabled:opacity-50">
-              {isFetchingNextPage ? 'Loading…' : (isAmharic ? 'ተጨማሪ ጫን' : 'Load more')}
+            <button
+              type="button"
+              onClick={() => void fetchNextPage()}
+              disabled={isFetchingNextPage}
+              className="px-4 py-2 rounded-lg bg-theme-subtle text-theme-main text-xs font-semibold disabled:opacity-50"
+            >
+              {isFetchingNextPage ? 'Loading…' : isAmharic ? 'ተጨማሪ ጫን' : 'Load more'}
             </button>
           </div>
         )}
