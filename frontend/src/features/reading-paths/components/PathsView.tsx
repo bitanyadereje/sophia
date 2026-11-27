@@ -34,12 +34,14 @@ import {
 import { useBookmarks } from '../../saved/useBookmarks';
 import { RouteSketch } from './RouteSketch';
 import { formatReadTime, StationStatus, TrailMap, TrailStation } from './TrailMap';
+import { BookCover } from '../../books/components/BookCover';
 
 interface PathsViewProps {
   isDetailView: boolean;
   selectedPathId?: string | null;
   onSelectPath: (pathId: string) => void;
   onNavigate: (screen: ScreenId) => void;
+  onBack?: () => void;
   onShowToast: (msg: string) => void;
   userId: string | null;
   canCreatePaths: boolean;
@@ -195,6 +197,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
   selectedPathId,
   onSelectPath,
   onNavigate,
+  onBack,
   onShowToast,
   userId,
   canCreatePaths,
@@ -469,6 +472,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
           position: pathBook.position,
           title: book?.title || 'Untitled book',
           author: book?.author_name || undefined,
+          cover_url: book?.cover_url ?? null,
           pages: Number(book?.page_count ?? 0),
           note: pathBook.note || undefined,
           status: toStationStatus(bookStatuses?.[String(pathBook.book_id)]),
@@ -611,7 +615,7 @@ export const PathsView: React.FC<PathsViewProps> = ({
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 pt-4 pb-12 sm:px-6 sm:pt-6 lg:max-w-5xl lg:px-8">
           {/* Top bar navigation */}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <button type="button" onClick={() => onNavigate('paths')} className={BTN_SECONDARY}>
+            <button type="button" onClick={() => onBack ? onBack() : onNavigate('paths')} className={BTN_SECONDARY}>
               <span className="material-symbols-outlined text-[18px]">arrow_back</span>
               <span>{isAmharic ? 'ሁሉም የንባብ መንገዶች' : 'All reading paths'}</span>
             </button>
@@ -828,6 +832,12 @@ export const PathsView: React.FC<PathsViewProps> = ({
                               >
                                 {isDone ? <Check size={14} /> : station.position}
                               </span>
+
+                              <BookCover
+                                book={station.bookId ? { title: station.title, cover_url: station.cover_url ?? null } : null}
+                                title={station.title}
+                                className="h-20 w-14 shrink-0"
+                              />
 
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">

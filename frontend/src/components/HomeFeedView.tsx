@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Book, ScreenId, UserProfile } from '../types';
 import { useLanguage } from '../context/LanguageContext';
@@ -7,6 +7,7 @@ import { loadDiscussionsWithAuthors, loadDiscussionTopics } from '../features/di
 import { loadReviews } from '../features/reviews/review.service';
 import { loadReviewerProfilesForReviews } from '../features/reviews/reviewerProfiles';
 import { createNote } from '../features/notes/notes.service';
+import { BookCover } from '../features/books/components/BookCover';
 
 interface ReadingTreatise {
   id: string;
@@ -80,32 +81,14 @@ const formatReplyCount = (n: number) => `${n} ${n === 1 ? 'reply' : 'replies'}`;
 /* Shared styles                                                       */
 /* Rules: serif = headings/titles only. Sans = buttons, meta, body.    */
 /* One primary action per card; all other actions share SECONDARY.     */
-/* Minimum text size 13px. Touch targets 44px.                         */
 /* ------------------------------------------------------------------ */
 const FOCUS = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-theme-highlight';
-const BTN_BASE = `inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 rounded-[10px] font-sans text-sm whitespace-nowrap transition-colors cursor-pointer ${FOCUS}`;
+const BTN_BASE = `inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 rounded-[9px] font-sans text-[13px] whitespace-nowrap transition-colors cursor-pointer ${FOCUS}`;
 const BTN_PRIMARY = `${BTN_BASE} bg-theme-primary text-theme-on-primary font-semibold hover:bg-theme-primary/90 disabled:opacity-50`;
 const BTN_SECONDARY = `${BTN_BASE} bg-theme-surface text-theme-main font-medium border border-theme-strong hover:bg-theme-subtle`;
 const GHOST_BTN = `${BTN_BASE} text-theme-muted hover:text-theme-main`;
 const DARK_BTN = BTN_PRIMARY;
 const SECTION_LABEL = 'text-[13px] font-sans font-semibold uppercase tracking-[0.12em] text-theme-muted whitespace-nowrap';
-
-/** Book cover: real image when the book has one, otherwise a generated cover. Fixed 3:4 ratio. */
-const BookCover: React.FC<{ title: string; src?: string | null; className?: string }> = ({ title, src, className = '' }) =>
-  src ? (
-    <div className={`overflow-hidden aspect-[3/4] rounded-r-lg rounded-l-sm border border-theme/70 bg-theme-subtle shadow-md ${className}`}>
-      <img src={src} alt={`Cover of ${title}`} className="w-full h-full object-cover" />
-    </div>
-  ) : (
-    <div
-      aria-hidden="true"
-      className={`relative aspect-[3/4] flex flex-col items-center justify-center gap-2 rounded-r-lg rounded-l-sm bg-theme-subtle border border-theme shadow-md ${className}`}
-    >
-      <div className="absolute inset-1.5 rounded-r-md rounded-l-[2px] border border-theme-highlight/60 pointer-events-none" />
-      <span className="material-symbols-outlined text-theme-highlight text-[22px]">menu_book</span>
-      <span className="font-serif text-[13px] leading-tight text-center text-theme-main px-3 line-clamp-3">{title}</span>
-    </div>
-  );
 
 const ModalShell: React.FC<{
   label: string;
@@ -268,6 +251,11 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
 
   const readingTreatises = useMemo<ReadingTreatise[]>(() => library
     .filter((entry) => entry.status === 'reading')
+    .sort((a, b) => {
+      const timeDiff = ts((b as any).updated_at) - ts((a as any).updated_at);
+      if (timeDiff !== 0) return timeDiff;
+      return (b.pages_read ?? 0) - (a.pages_read ?? 0);
+    })
     .flatMap((entry) => {
       const book = books.find((candidate) => candidate.id === entry.book_id);
       if (!book) return [];
@@ -287,6 +275,65 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
         seminarNew: seminarStats[book.id]?.fresh ?? 0,
       }];
     }), [library, books, seminarStats]);
+
+  const [selectedTreatiseId, setSelectedTreatiseId] = useState<string | null>(null);
+  const [isBookPickerOpen, setIsBookPickerOpen] = useState(false);
+  const bookPickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isBookPickerOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (bookPickerRef.current && !bookPickerRef.current.contains(e.target as Node)) {
+        setIsBookPickerOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsBookPickerOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isBookPickerOpen]);
+
+  const activeTreatise = useMemo(() => {
+    if (readingTreatises.length === 0) return null;
+    return readingTreatises.find((t) => t.id === selectedTreatiseId) ?? readingTreatises[0];
+  }, [readingTreatises, selectedTreatiseId]);
+
+  const activeTreatiseIndex = activeTreatise
+    ? Math.max(0, readingTreatises.findIndex((t) => t.id === activeTreatise.id))
+    : 0;
+
+  // Show at most 4 books with the current book centered in the available window.
+  // If current is the last book, show it at the bottom with the 3 books before it (4 total).
+  // If current is near the start, show it near the top with the books after it (4 total).
+  const visiblePathWindow = useMemo(() => {
+    if (!activePath || activePath.steps.length === 0) {
+      return { steps: [], hasBefore: false, hasAfter: false };
+    }
+    const steps = activePath.steps;
+    const maxVisible = 4;
+    const foundIndex = steps.findIndex((s) => s.status === 'current');
+    const centerIndex = foundIndex !== -1 ? foundIndex : 0;
+
+    // Place centerIndex as close to the middle of the 4-item window as possible (slot 1 or 2)
+    let start = Math.max(0, centerIndex - 1);
+    let end = Math.min(steps.length, start + maxVisible);
+
+    // If we hit the end of the path (e.g. current is the last book), pull start back so 4 books still show
+    if (end - start < maxVisible) {
+      start = Math.max(0, end - maxVisible);
+    }
+
+    return {
+      steps: steps.slice(start, end),
+      hasBefore: start > 0,
+      hasAfter: end < steps.length,
+    };
+  }, [activePath]);
 
   const { feedItems, isTrending } = useMemo(() => {
     const topics = metaData?.topics ?? {};
@@ -448,7 +495,15 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
   const greeting = isAmharic
     ? `ሰላም, ${firstName}`
     : `${hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}, ${firstName}`;
-  const hasReading = readingTreatises.length > 0;
+
+  const activeProgressLabel = activeTreatise
+    ? activeTreatise.pagesRead > 0
+      ? (activeTreatise.pageCount ? `Page ${activeTreatise.pagesRead} of ${activeTreatise.pageCount}` : `Page ${activeTreatise.pagesRead}`)
+      : 'Not started'
+    : '';
+  const activeLocationSub = activeTreatise
+    ? (activeTreatise.pagesRead > 0 ? `Page ${activeTreatise.pagesRead}` : 'In progress')
+    : '';
 
   return (
     <div
@@ -474,11 +529,70 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
         {/* READING + PATH */}
         <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-stretch">
           <section id="home-currently-reading" aria-label="Currently Reading" className="flex flex-col gap-2.5">
-            <h2 className={SECTION_LABEL}>{isAmharic ? 'በማንበብ ላይ ያሉ' : 'CURRENTLY READING'}</h2>
+            <div className="flex items-center justify-between gap-2 min-h-[26px]">
+              <h2 className={SECTION_LABEL}>{isAmharic ? 'በማንበብ ላይ ያሉ' : 'CURRENTLY READING'}</h2>
+              {readingTreatises.length > 1 && (
+                <div ref={bookPickerRef} className="relative">
+                  <button
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={isBookPickerOpen}
+                    onClick={() => setIsBookPickerOpen((prev) => !prev)}
+                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-sans font-medium bg-theme-subtle text-theme-main border border-theme hover:border-theme-strong transition-colors cursor-pointer ${FOCUS}`}
+                  >
+                    <span>
+                      {activeTreatiseIndex + 1} of {readingTreatises.length}
+                    </span>
+                    <span className="material-symbols-outlined text-[15px] text-theme-muted" aria-hidden="true">
+                      expand_more
+                    </span>
+                  </button>
+
+                  {isBookPickerOpen && (
+                    <div
+                      role="listbox"
+                      aria-label="Choose active book"
+                      className="absolute right-0 mt-1.5 w-64 bg-theme-surface border border-theme-strong rounded-xl shadow-lg p-1.5 z-30 space-y-0.5"
+                    >
+                      {readingTreatises.map((t) => {
+                        const isSelected = activeTreatise?.id === t.id;
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            onClick={() => {
+                              setSelectedTreatiseId(t.id);
+                              setIsBookPickerOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-2 rounded-lg flex items-center justify-between gap-2 text-xs font-sans transition-colors cursor-pointer ${FOCUS} ${
+                              isSelected
+                                ? 'bg-theme-subtle text-theme-main font-semibold'
+                                : 'text-theme-body hover:bg-theme-subtle/60 hover:text-theme-main'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate">{t.title}</p>
+                              <p className="text-[11px] text-theme-muted truncate">{t.author} · {t.progress}%</p>
+                            </div>
+                            {isSelected && (
+                              <span className="material-symbols-outlined text-[16px] text-theme-highlight flex-none" aria-hidden="true">
+                                check
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             {currentUserId && isLibraryPending ? (
               <p className="py-8 text-center text-sm text-theme-muted">Loading your reading list...</p>
-            ) : !hasReading ? (
+            ) : !activeTreatise ? (
               <div className="bg-theme-surface border border-theme rounded-2xl p-6 flex-1 flex flex-col justify-between gap-4">
                 <div>
                   <h3 className="font-serif text-2xl font-semibold text-theme-main">Start your first book</h3>
@@ -487,123 +601,148 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                 <div>
                   <button type="button" onClick={() => onNavigate('library')} className={BTN_PRIMARY}>
                     <span>Browse library</span>
-                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span>
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">arrow_forward</span>
                   </button>
                 </div>
               </div>
-            ) : readingTreatises.map((item) => {
-              const progressLabel = item.pagesRead > 0
-                ? (item.pageCount ? `Page ${item.pagesRead} of ${item.pageCount}` : `Page ${item.pagesRead}`)
-                : 'Not started';
-              const locationSub = item.pagesRead > 0 ? `Page ${item.pagesRead}` : 'In progress';
+            ) : (
+              <article
+                id={`reading-treatise-${activeTreatise.id}`}
+                onClick={() => handleOpenBookDetail(activeTreatise)}
+                className="bg-theme-surface border border-theme rounded-2xl p-5 flex gap-5 transition-colors hover:border-theme-strong cursor-pointer flex-1"
+              >
+                <BookCover book={{ title: activeTreatise.title, cover_url: activeTreatise.cover ?? null }} className="aspect-[3/4] w-24 sm:w-28 flex-none self-start" />
+                <div className="flex-1 min-w-0 flex flex-col justify-between gap-3">
+                  <div>
+                    <h3 className="font-serif text-xl sm:text-2xl font-semibold text-theme-main leading-snug truncate">
+                      {activeTreatise.title}
+                    </h3>
+                    <p className="text-sm text-theme-muted font-sans mt-0.5 truncate">{activeTreatise.author}</p>
+                  </div>
 
-              return (
-                <article
-                  key={item.id}
-                  id={`reading-treatise-${item.id}`}
-                  onClick={() => handleOpenBookDetail(item)}
-                  className="bg-theme-surface border border-theme rounded-2xl p-5 flex gap-5 transition-colors hover:border-theme-strong cursor-pointer flex-1"
-                >
-                  <BookCover title={item.title} src={item.cover} className="w-24 sm:w-28 flex-none self-start" />
-                  <div className="flex-1 min-w-0 flex flex-col justify-between gap-3">
-                    <div>
-                      <h3 className="font-serif text-xl sm:text-2xl font-semibold text-theme-main leading-snug truncate">
-                        {item.title}
-                      </h3>
-                      <p className="text-sm text-theme-muted font-sans mt-0.5 truncate">{item.author}</p>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-baseline text-sm font-sans">
+                      <span className="text-theme-body">{activeProgressLabel}</span>
+                      <span className="font-semibold text-theme-main">{activeTreatise.progress}%</span>
                     </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between items-baseline text-sm font-sans">
-                        <span className="text-theme-body">{progressLabel}</span>
-                        <span className="font-semibold text-theme-main">{item.progress}%</span>
-                      </div>
-                      <div
-                        role="progressbar"
-                        aria-valuenow={item.progress}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-label={`Reading progress for ${item.title}`}
-                        className="h-2 w-full bg-theme-subtle rounded-full overflow-hidden"
-                      >
-                        <div className="h-full bg-theme-highlight transition-all duration-300 rounded-full" style={{ width: `${item.progress}%` }} />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2.5 flex-wrap pt-1">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setLoggerBook(item.id);
-                          setIsLoggerModalOpen(true);
-                        }}
-                        className={BTN_PRIMARY}
-                      >
-                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">menu_book</span>
-                        <span>Log reading</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveNotesBook({ id: item.id, title: item.title, location: locationSub });
-                          setNewNoteTitle('');
-                          setNewNoteText('');
-                        }}
-                        className={BTN_SECONDARY}
-                      >
-                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">edit_note</span>
-                        <span>Write note</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveDiscussionBook({
-                            id: item.id,
-                            title: item.title,
-                            location: locationSub,
-                            prompt: item.discussionPrompt,
-                            repliesCount: item.discussionReplies,
-                          });
-                        }}
-                        className={BTN_SECONDARY}
-                      >
-                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">forum</span>
-                        <span>Discuss</span>
-                        {item.seminarNew > 0 && (
-                          <span
-                            aria-label={`${item.seminarNew} new in this seminar`}
-                            className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-theme-primary text-theme-on-primary text-[13px] font-sans font-bold inline-flex items-center justify-center"
-                          >
-                            {item.seminarNew > 99 ? '99+' : item.seminarNew}
-                          </span>
-                        )}
-                      </button>
+                    <div
+                      role="progressbar"
+                      aria-valuenow={activeTreatise.progress}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label={`Reading progress for ${activeTreatise.title}`}
+                      className="h-2 w-full bg-theme-subtle rounded-full overflow-hidden"
+                    >
+                      <div className="h-full bg-theme-highlight transition-all duration-300 rounded-full" style={{ width: `${activeTreatise.progress}%` }} />
                     </div>
                   </div>
-                </article>
-              );
-            })}
+
+                  <div className="flex items-center gap-2 flex-wrap pt-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLoggerBook(activeTreatise.id);
+                        setIsLoggerModalOpen(true);
+                      }}
+                      className={BTN_PRIMARY}
+                    >
+                      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">menu_book</span>
+                      <span>Log reading</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveNotesBook({ id: activeTreatise.id, title: activeTreatise.title, location: activeLocationSub });
+                        setNewNoteTitle('');
+                        setNewNoteText('');
+                      }}
+                      className={BTN_SECONDARY}
+                    >
+                      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">edit_note</span>
+                      <span>Write note</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveDiscussionBook({
+                          id: activeTreatise.id,
+                          title: activeTreatise.title,
+                          location: activeLocationSub,
+                          prompt: activeTreatise.discussionPrompt,
+                          repliesCount: activeTreatise.discussionReplies,
+                        });
+                      }}
+                      className={BTN_SECONDARY}
+                    >
+                      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">forum</span>
+                      <span>Discuss</span>
+                      {activeTreatise.seminarNew > 0 && (
+                        <span
+                          aria-label={`${activeTreatise.seminarNew} new in this seminar`}
+                          className="min-w-[18px] h-[18px] px-1 rounded-full bg-theme-primary text-theme-on-primary text-[11px] font-sans font-bold inline-flex items-center justify-center"
+                        >
+                          {activeTreatise.seminarNew > 99 ? '99+' : activeTreatise.seminarNew}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            )}
           </section>
 
-          {/* YOUR PATH */}
+          {/* YOUR PATH (entire card is clickable to open Paths) */}
           <section aria-label="Your path" className="flex flex-col gap-2.5">
-            <h2 className={SECTION_LABEL}>{isAmharic ? 'መንገድዎ' : 'YOUR PATH'}</h2>
-            <div className="bg-theme-subtle border border-theme rounded-2xl p-6 flex-1 flex flex-col justify-between gap-4">
+            <div className="flex items-center justify-between gap-2 min-h-[26px]">
+              <h2 className={SECTION_LABEL}>{isAmharic ? 'መንገድዎ' : 'YOUR PATH'}</h2>
+            </div>
+            <div
+              role="link"
+              tabIndex={0}
+              aria-label={activePath ? `Open full path: ${activePath.title}` : 'Browse reading paths'}
+              onClick={() => onNavigate('paths' as ScreenId)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onNavigate('paths' as ScreenId);
+                }
+              }}
+              className={`bg-theme-subtle border border-theme rounded-2xl p-5 flex-1 flex flex-col justify-between gap-3 transition-colors hover:border-theme-strong cursor-pointer group ${FOCUS}`}
+            >
               {activePath ? (
                 <>
-                  <div>
-                    <h3 className="font-serif text-xl sm:text-2xl font-semibold text-theme-main">{activePath.title}</h3>
-                    <p className="text-sm text-theme-muted mt-0.5">
-                      {activePath.steps.filter((s) => s.status === 'done').length} of {activePath.steps.length} books complete
-                    </p>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="font-serif text-lg sm:text-xl font-semibold text-theme-main group-hover:text-theme-accent transition-colors leading-snug truncate">
+                        {activePath.title}
+                      </h3>
+                      <p className="text-xs text-theme-muted font-sans mt-0.5">
+                        {activePath.steps.filter((s) => s.status === 'done').length} of {activePath.steps.length} books complete
+                      </p>
+                    </div>
+                    <span
+                      aria-hidden="true"
+                      className="inline-flex items-center gap-0.5 text-xs font-sans font-medium text-theme-muted group-hover:text-theme-main transition-colors flex-none pt-1"
+                    >
+                      <span>Explore</span>
+                      <span className="material-symbols-outlined text-[15px] transition-transform group-hover:translate-x-0.5">
+                        arrow_forward
+                      </span>
+                    </span>
                   </div>
-                  <ol className="relative flex flex-col gap-2.5">
-                    <span aria-hidden="true" className="absolute left-[9px] top-2.5 bottom-2.5 w-px bg-theme-strong" />
-                    {activePath.steps.map((step) => (
-                      <li key={step.id} className="relative flex items-center gap-3">
+
+                  <ol className="relative flex flex-col gap-2 my-auto">
+                    <span
+                      aria-hidden="true"
+                      className={`absolute left-[9px] w-px bg-theme-strong ${
+                        visiblePathWindow.hasBefore ? '-top-1.5' : 'top-2.5'
+                      } ${visiblePathWindow.hasAfter ? '-bottom-1.5' : 'bottom-2.5'}`}
+                    />
+                    {visiblePathWindow.steps.map((step) => (
+                      <li key={step.id} className="relative flex items-center gap-2.5 min-w-0">
                         <span
                           className={`w-5 h-5 rounded-full flex-none flex items-center justify-center border ${
                             step.status === 'done'
@@ -613,36 +752,46 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                                 : 'bg-theme-surface border-theme-strong'
                           }`}
                         >
-                          {step.status === 'done' && <span className="material-symbols-outlined text-[13px] font-bold" aria-hidden="true">check</span>}
+                          {step.status === 'done' && (
+                            <span className="material-symbols-outlined text-[13px] font-bold" aria-hidden="true">
+                              check
+                            </span>
+                          )}
                         </span>
-                        <span className={`text-sm font-sans truncate ${step.status === 'current' ? 'text-theme-main font-semibold' : 'text-theme-body'}`}>
+                        <span
+                          className={`text-[13px] font-sans truncate ${
+                            step.status === 'current' ? 'text-theme-main font-semibold' : 'text-theme-body'
+                          }`}
+                        >
                           {step.title}
                         </span>
                         {step.status === 'current' && (
-                          <span className="text-[13px] font-sans font-semibold px-2 py-0.5 rounded-full bg-theme-surface text-theme-main flex-none">Up next</span>
+                          <span className="text-[11px] font-sans font-semibold px-2 py-0.5 rounded-full bg-theme-surface border border-theme text-theme-main flex-none ml-auto">
+                            Up next
+                          </span>
                         )}
                       </li>
                     ))}
                   </ol>
                 </>
               ) : (
-                <div>
-                  <h3 className="font-serif text-2xl font-semibold text-theme-main">Pick a path</h3>
-                  <p className="text-sm text-theme-body mt-1 leading-relaxed">
-                    A path orders books by difficulty and tells you what to read next.
-                  </p>
+                <div className="flex flex-col justify-between flex-1 gap-3">
+                  <div>
+                    <h3 className="font-serif text-xl sm:text-2xl font-semibold text-theme-main group-hover:text-theme-accent transition-colors">
+                      Pick a path
+                    </h3>
+                    <p className="text-sm text-theme-body mt-1 leading-relaxed">
+                      A path orders books by difficulty and tells you what to read next.
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-xs font-sans font-semibold text-theme-accent">
+                    <span>Browse paths</span>
+                    <span className="material-symbols-outlined text-[15px] transition-transform group-hover:translate-x-0.5" aria-hidden="true">
+                      arrow_forward
+                    </span>
+                  </span>
                 </div>
               )}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => onNavigate('paths' as ScreenId)}
-                  className={BTN_SECONDARY}
-                >
-                  <span>{activePath ? 'View full path' : 'Browse paths'}</span>
-                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span>
-                </button>
-              </div>
             </div>
           </section>
         </div>
@@ -661,10 +810,10 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
             <button
               type="button"
               onClick={() => onNavigate('discussions')}
-              className={`text-sm font-sans font-semibold text-theme-accent hover:underline cursor-pointer inline-flex items-center gap-1 min-h-[44px] ${FOCUS}`}
+              className={`text-sm font-sans font-semibold text-theme-accent hover:underline cursor-pointer inline-flex items-center gap-1 min-h-[38px] ${FOCUS}`}
             >
               <span>{isAmharic ? 'ሁሉንም ውይይቶች እይ' : 'All discussions'}</span>
-              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span>
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">arrow_forward</span>
             </button>
           </div>
 
@@ -736,7 +885,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                 id="logger-book"
                 value={loggerBook}
                 onChange={(e) => setLoggerBook(e.target.value)}
-                className="w-full min-h-[44px] bg-theme-app border border-theme-strong rounded-[10px] px-3 font-sans text-theme-main focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40"
+                className="w-full min-h-[40px] bg-theme-app border border-theme-strong rounded-[10px] px-3 font-sans text-theme-main focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40"
               >
                 {readingTreatises.map((item) => (
                   <option key={item.id} value={item.id}>{item.title} ({item.author})</option>
@@ -753,7 +902,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
                   max={150}
                   value={loggerPagesRead}
                   onChange={(e) => setLoggerPagesRead(Number(e.target.value))}
-                  className="w-24 min-h-[44px] bg-theme-app border border-theme-strong rounded-[10px] px-3 font-sans text-theme-main text-center focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40"
+                  className="w-24 min-h-[40px] bg-theme-app border border-theme-strong rounded-[10px] px-3 font-sans text-theme-main text-center focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40"
                   required
                 />
                 <span className="text-sm text-theme-muted font-sans">pages read in contemplative silence</span>
@@ -785,7 +934,7 @@ export const HomeFeedView: React.FC<HomeFeedViewProps> = ({
             value={newNoteTitle}
             onChange={(e) => setNewNoteTitle(e.target.value)}
             placeholder="Title (optional)"
-            className="w-full min-h-[44px] bg-theme-app border border-theme-strong rounded-[10px] px-3 text-sm font-sans text-theme-main focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40"
+            className="w-full min-h-[40px] bg-theme-app border border-theme-strong rounded-[10px] px-3 text-sm font-sans text-theme-main focus:outline-none focus:border-theme-highlight focus:ring-2 focus:ring-theme-highlight/40"
           />
           <textarea
             autoFocus

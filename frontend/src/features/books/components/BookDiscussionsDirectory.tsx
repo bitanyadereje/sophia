@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Book, ScreenId } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
+import { BookCover } from './BookCover';
 
 interface BookDiscussionsDirectoryProps {
   books: Book[];
@@ -181,20 +182,7 @@ export const BookDiscussionsDirectory: React.FC<BookDiscussionsDirectoryProps> =
                 className="group bg-theme-surface rounded-xl border border-theme p-4 sm:p-5 flex flex-col justify-between hover:border-theme-accent/50 hover:shadow-md transition-all duration-200 cursor-pointer text-left"
               >
                 <div className="flex gap-3.5 items-start">
-                  <div className="w-16 h-22 sm:w-18 sm:h-24 rounded-md overflow-hidden flex-shrink-0 bg-theme-subtle border border-theme shadow-2xs relative">
-                    {book.cover_url ? (
-                      <img
-                        src={book.cover_url}
-                        alt={book.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-theme-subtle">
-                        <span className="material-symbols-outlined text-2xl">menu_book</span>
-                      </div>
-                    )}
-                  </div>
+                  <BookCover book={book} className="h-22 w-16 sm:h-24 sm:w-18 flex-shrink-0" imageClassName="group-hover:scale-105 transition-transform duration-300" />
 
                   <div className="flex flex-col min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 mb-1">

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Book, Review } from '../../../types';
+import { BookCover as SharedBookCover } from '../../books/components/BookCover';
 
 interface ReviewerProfile {
   name?: string | null;
@@ -33,22 +34,6 @@ const stripMarkdown = (text: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const COVER_PALETTES = [
-  'bg-[#182232] text-[#F4EFE6] border-[#26344A]', // Deep Navy
-  'bg-[#5D242B] text-[#F6EFE6] border-[#76313A]', // Burgundy
-  'bg-[#234438] text-[#F3EFE6] border-[#305A4B]', // Forest Green
-  'bg-[#6B4A23] text-[#F7F1E6] border-[#845C2E]', // Warm Umber
-];
-
-const hashString = (value: string): number => {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-};
-
 interface BookCoverProps {
   book?: Book;
   fallbackTitle?: string;
@@ -60,32 +45,7 @@ export const BookCover: React.FC<BookCoverProps> = ({
   fallbackTitle = 'Book',
   className = 'h-32 w-24',
 }) => {
-  const title = book?.title?.trim() || fallbackTitle;
-
-  if (book?.cover_url) {
-    return (
-      <img
-        src={book.cover_url}
-        alt={`Cover of ${title}`}
-        className={`${className} rounded-md object-cover flex-shrink-0 border border-theme shadow-xs`}
-      />
-    );
-  }
-
-  const palette = COVER_PALETTES[hashString(title) % COVER_PALETTES.length];
-
-  return (
-    <div
-      aria-label={`Generated cover for ${title}`}
-      className={`${className} ${palette} rounded-md border shadow-xs flex-shrink-0 px-2 py-2.5 flex flex-col items-center justify-center text-center select-none relative overflow-hidden`}
-    >
-      <div className="absolute inset-y-0 left-0 w-1.5 bg-black/20" />
-      <span className="text-[#D4AF37] text-xs leading-none mb-1.5 font-serif">✝</span>
-      <p className="font-serif text-[11px] font-semibold leading-snug line-clamp-3 break-words">
-        {title}
-      </p>
-    </div>
-  );
+  return <SharedBookCover book={book} title={fallbackTitle} className={className} />;
 };
 
 interface StarRatingProps {
@@ -303,20 +263,20 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
         </div>
       </div>
 
-      <div className="pt-3 border-t border-theme/60">
-        <div className="flex items-center justify-between gap-2 text-xs text-theme-muted">
-          <div className="flex items-center gap-4">
+      <div className="pt-2.5 border-t border-theme/60">
+        <div className="flex items-center justify-between gap-2 text-[11px] text-theme-muted">
+          <div className="flex items-center gap-3.5">
             <button
               type="button"
               onClick={onLike}
               aria-label={isAmharic ? 'ውደድ' : 'Like review'}
               title={isAmharic ? 'ውደድ' : 'Like review'}
-              className={`flex items-center gap-1 py-0.5 rounded hover:text-theme-main transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 rounded hover:text-theme-main transition-colors cursor-pointer ${
                 isLiked ? 'text-theme-accent font-semibold' : ''
               }`}
             >
               <span
-                className="material-symbols-outlined text-[17px]"
+                className="material-symbols-outlined text-[15px] leading-none"
                 style={{ fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0" }}
               >
                 favorite
@@ -329,11 +289,11 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
               onClick={onToggleComments}
               aria-label={isAmharic ? 'አስተያየት' : 'Comments'}
               title={isAmharic ? 'አስተያየት' : 'Comments'}
-              className={`flex items-center gap-1 py-0.5 rounded hover:text-theme-main transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 rounded hover:text-theme-main transition-colors cursor-pointer ${
                 isCommentOpen ? 'text-theme-main' : ''
               }`}
             >
-              <span className="material-symbols-outlined text-[17px]">
+              <span className="material-symbols-outlined text-[15px] leading-none">
                 chat_bubble_outline
               </span>
               {review.comment_count > 0 && <span>{review.comment_count}</span>}
@@ -344,12 +304,12 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
               onClick={onSave}
               aria-label={isSaved ? (isAmharic ? 'ተቀምጧል' : 'Saved') : isAmharic ? 'አስቀምጥ' : 'Save review'}
               title={isSaved ? (isAmharic ? 'ተቀምጧል' : 'Saved') : isAmharic ? 'አስቀምጥ' : 'Save review'}
-              className={`flex items-center py-0.5 rounded hover:text-theme-main transition-colors cursor-pointer ${
+              className={`flex items-center rounded hover:text-theme-main transition-colors cursor-pointer ${
                 isSaved ? 'text-theme-accent' : ''
               }`}
             >
               <span
-                className="material-symbols-outlined text-[17px]"
+                className="material-symbols-outlined text-[15px] leading-none"
                 style={{ fontVariationSettings: isSaved ? "'FILL' 1" : "'FILL' 0" }}
               >
                 bookmark

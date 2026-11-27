@@ -109,3 +109,67 @@ export const deleteReadingPath = async (pathId: string): Promise<void> => {
   const { error } = await supabase.from('reading_paths').delete().eq('id', pathId);
   if (error) throw error;
 };
+
+export interface ActivePathSummary {
+  id: string;
+  title: string;
+  steps: { id: string; title: string; status: 'done' | 'current' | 'upcoming' }[];
+}
+
+export const loadActiveUserPath = async (
+  userId: string,
+  libraryEntries: { book_id: string; status: string }[],
+): Promise<ActivePathSummary | null> => {
+  const { data: savedRows, error: savedError } = await supabase
+    .from('saved_paths')
+    .select('path_id, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (savedError) {
+    console.error('[loadActiveUserPath] saved_paths error:', savedError);
+    return null;
+  }
+
+  const targetPathId = savedRows?.[0]?.path_id;
+  if (!targetPathId) return null;
+
+  const [{ data: pathMeta, error: pathError }, pathBooks] = await Promise.all([
+    supabase
+      .from('reading_paths')
+      .select('id, title')
+      .eq('id', targetPathId)
+      .maybeSingle(),
+    loadReadingPathBooks(targetPathId),
+  ]);
+
+  if (pathError || !pathMeta || pathBooks.length === 0) return null;
+
+  const statusByBookId = new Map(
+    libraryEntries.map((entry) => [entry.book_id, entry.status]),
+  );
+
+  let foundCurrent = false;
+  const steps: ActivePathSummary['steps'] = [];
+
+  for (const row of pathBooks) {
+    const book = Array.isArray(row.book) ? row.book[0] : row.book;
+    if (!book) continue;
+
+    if (statusByBookId.get(book.id) === 'finished') {
+      steps.push({ id: book.id, title: book.title, status: 'done' });
+    } else if (!foundCurrent) {
+      foundCurrent = true;
+      steps.push({ id: book.id, title: book.title, status: 'current' });
+    } else {
+      steps.push({ id: book.id, title: book.title, status: 'upcoming' });
+    }
+  }
+
+  return {
+    id: pathMeta.id,
+    title: pathMeta.title,
+    steps,
+  };
+};

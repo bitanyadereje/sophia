@@ -4,6 +4,7 @@ import { Book, ScreenId } from '../types';
 import { loadDiscussionsWithAuthors } from '../features/discussions/services/discussion.service';
 import { loadReviews } from '../features/reviews/review.service';
 import { loadReviewerProfilesForReviews } from '../features/reviews/reviewerProfiles';
+import { BookCover } from '../features/books/components/BookCover';
 
 interface LandingViewProps {
   books?: Book[];
@@ -367,19 +368,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
                       className="bg-theme-surface border border-theme hover:border-theme-accent/60 rounded-xl p-4 flex items-center gap-4 transition-colors group cursor-pointer"
                     >
                       {/* Mini Book Cover Thumbnail */}
-                      {book?.cover_url ? (
-                        <img
-                          src={book.cover_url}
-                          alt={book.title}
-                          className="w-10 h-14 rounded-md object-cover border border-theme flex-none"
-                        />
-                      ) : (
-                        <div className="w-10 h-14 rounded-md bg-theme-subtle border border-theme flex items-center justify-center flex-none">
-                          <span className="material-symbols-outlined text-theme-gold text-[18px]">
-                            menu_book
-                          </span>
-                        </div>
-                      )}
+                      <BookCover book={book} title="Book" className="h-14 w-10 flex-none" />
 
                       <div className="min-w-0 flex-1">
                         <h3 className="font-serif text-sm sm:text-base font-medium text-theme-main group-hover:text-theme-gold transition-colors truncate">

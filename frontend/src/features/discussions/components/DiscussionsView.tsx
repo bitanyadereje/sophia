@@ -1,8 +1,21 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Question, QuestionReply, ScreenId, UserProfile } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { createDiscussion, createReply, deleteDiscussion, deleteDiscussionReply, loadCurrentUserPostLikes, loadDiscussionPage, loadDiscussionTopics, loadThreadRepliesWithAuthors, togglePostLike, toggleReplyLike, updateDiscussion, updateDiscussionReply } from '../services/discussion.service';
+import {
+  createDiscussion,
+  createReply,
+  deleteDiscussion,
+  deleteDiscussionReply,
+  loadCurrentUserPostLikes,
+  loadDiscussionPage,
+  loadDiscussionTopics,
+  loadThreadRepliesWithAuthors,
+  togglePostLike,
+  toggleReplyLike,
+  updateDiscussion,
+  updateDiscussionReply,
+} from '../services/discussion.service';
 import { useBookmarks } from '../../saved/useBookmarks';
 
 interface DiscussionsViewProps {
@@ -15,9 +28,20 @@ interface DiscussionsViewProps {
 
 const countAllReplies = (replies: QuestionReply[] = []): number =>
   replies.reduce((count, reply) => count + 1 + countAllReplies(reply.replies ?? []), 0);
+
 const EMPTY_LIKED_IDS = new Set<string>();
 
-// Fallback avatar helper that handles image loading errors gracefully with a monogram
+const formatEditorialDate = (iso?: string): string => {
+  if (!iso) return '';
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+};
+
 const AvatarWithFallback: React.FC<{
   src?: string;
   name: string;
@@ -29,7 +53,7 @@ const AvatarWithFallback: React.FC<{
   if (!src || failed) {
     return (
       <div
-        className={`${sizeClass} rounded-full bg-stone-700 dark:bg-stone-600 text-stone-100 font-serif font-semibold text-xs flex items-center justify-center shrink-0 shadow-2xs select-none`}
+        className={`${sizeClass} rounded-full bg-[#362c1b] text-[#dfba69] border border-[#c8a256]/40 font-serif font-semibold text-xs flex items-center justify-center shrink-0 select-none`}
       >
         {initial}
       </div>
@@ -41,16 +65,14 @@ const AvatarWithFallback: React.FC<{
       src={src}
       alt={name}
       onError={() => setFailed(true)}
-      className={`${sizeClass} rounded-full object-cover ring-1 ring-black/10 shrink-0 shadow-2xs`}
+      className={`${sizeClass} rounded-full object-cover ring-1 ring-[#c8a256]/30 shrink-0`}
     />
   );
 };
 
-// ---------------------------------------------------------------------------
-// Flat, Airy Nested Comment Component with Continuous Vertical Guide Lines
-// ---------------------------------------------------------------------------
 interface NestedCommentItemProps {
   comment: QuestionReply;
+  postAuthorName: string;
   depth: number;
   likedReplies: Record<string, boolean>;
   currentUser?: UserProfile;
@@ -64,6 +86,7 @@ interface NestedCommentItemProps {
 
 const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
   comment,
+  postAuthorName,
   depth,
   likedReplies,
   currentUser,
@@ -72,26 +95,44 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
   onDeleteReply,
   inlineReplyingId,
   onSetInlineReplyingId,
-  onSubmitReply
+  onSubmitReply,
 }) => {
   const { isAmharic } = useLanguage();
   const [inlineText, setInlineText] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(comment.text);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   const inlineInputRef = useRef<HTMLTextAreaElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const isReplyingHere = inlineReplyingId === comment.id;
-  const isAuthor = !!currentUser?.name && currentUser.name.trim().toLowerCase() === comment.author.trim().toLowerCase();
+  const isCommentOwner =
+    !!currentUser?.name &&
+    currentUser.name.trim().toLowerCase() === comment.author.trim().toLowerCase();
+  const isThreadAuthor =
+    !!postAuthorName &&
+    postAuthorName.trim().toLowerCase() === comment.author.trim().toLowerCase();
 
   useEffect(() => {
     if (isReplyingHere) {
-      setTimeout(() => {
-        inlineInputRef.current?.focus();
-      }, 50);
+      setTimeout(() => inlineInputRef.current?.focus(), 50);
     } else {
       setInlineText('');
     }
   }, [isReplyingHere]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+        setConfirmDelete(false);
+      }
+    };
+    if (menuOpen) document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [menuOpen]);
 
   const isReplyLiked =
     !!likedReplies[comment.id] ||
@@ -123,56 +164,147 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
 
   return (
     <div id={`comment-${comment.id}`} className="relative group/comment">
-      {/* Top row: small circular avatar next to bolded username and muted timestamp */}
-      <div className="flex items-center gap-2.5 text-sm">
-        <AvatarWithFallback
-          src={comment.authorAvatar}
-          name={comment.author}
-          sizeClass="w-6 h-6 sm:w-7 sm:h-7"
-        />
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <span className="font-bold text-sm text-theme-main leading-none">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+          <AvatarWithFallback
+            src={comment.authorAvatar}
+            name={comment.author}
+            sizeClass="w-7 h-7"
+          />
+          <span className="font-sans font-semibold text-[13.5px] text-theme-main leading-none">
             {comment.author}
           </span>
-          <span className="text-xs text-theme-muted leading-none">
+          {isThreadAuthor && (
+            <span className="text-[10.5px] font-sans px-2 py-0.5 rounded-full bg-[#362c1b] text-[#dfba69] border border-[#c8a256]/35 font-medium leading-none">
+              Author
+            </span>
+          )}
+          <span className="text-xs font-sans text-theme-muted leading-none">
             {comment.timeAgo}
           </span>
           {comment.replyToAuthor && (
-            <span className="text-xs text-theme-muted leading-none flex items-center gap-1">
+            <span className="text-xs font-sans text-theme-muted leading-none flex items-center gap-1">
               <span>replied to</span>
               <span className="font-medium text-theme-main">
                 @{comment.replyToAuthor.replace(/\s+/g, '')}
               </span>
             </span>
           )}
-          {comment.thesisTag && (
-            <span className="text-[11px] text-theme-accent font-medium leading-none">
-              · {comment.thesisTag}
-            </span>
-          )}
         </div>
+
+        {isCommentOwner && !isEditing && (
+          <div ref={menuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen((prev) => !prev);
+                setConfirmDelete(false);
+              }}
+              aria-label="Comment options"
+              className="w-7 h-7 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px]">more_horiz</span>
+            </button>
+
+            {menuOpen && (
+              <div className="absolute right-0 top-8 z-30 w-44 rounded-xl bg-theme-surface border border-stone-500/25 shadow-2xl py-1.5 text-xs font-sans">
+                {!confirmDelete ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditDraft(comment.text);
+                        setIsEditing(true);
+                        onSetInlineReplyingId(null);
+                        setMenuOpen(false);
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-theme-main hover:bg-theme-subtle flex items-center gap-2 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">edit</span>
+                      <span>{isAmharic ? 'አስተካክል' : 'Edit reflection'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(true)}
+                      className="w-full px-3.5 py-2 text-left text-red-400 hover:bg-red-500/10 flex items-center gap-2 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">delete</span>
+                      <span>{isAmharic ? 'አጥፋ' : 'Delete reflection'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <div className="px-3.5 py-2 space-y-2">
+                    <p className="text-[11px] text-theme-muted leading-snug">
+                      {isAmharic ? 'ይህን አስተያየት መሰረዝ ይፈልጋሉ?' : 'Delete this reflection?'}
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setConfirmDelete(false);
+                          void onDeleteReply(comment.id);
+                        }}
+                        className="flex-1 py-1 px-2 rounded bg-red-600 text-white font-semibold hover:bg-red-700 cursor-pointer"
+                      >
+                        {isAmharic ? 'አዎ' : 'Delete'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDelete(false)}
+                        className="flex-1 py-1 px-2 rounded bg-theme-subtle text-theme-main hover:opacity-80 cursor-pointer"
+                      >
+                        {isAmharic ? 'ተው' : 'Cancel'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Main text body: balanced font size */}
       {isEditing ? (
-        <form onSubmit={handleEditSubmit} className="mt-2 pl-8 sm:pl-9 flex flex-col gap-2 max-w-xl">
-          <textarea rows={3} value={editDraft} onChange={(e) => setEditDraft(e.target.value)} className="w-full text-sm bg-transparent border border-stone-300 dark:border-stone-700 rounded-lg p-2.5 text-theme-main focus:outline-none focus:border-stone-500 font-serif resize-y" />
+        <form onSubmit={handleEditSubmit} className="mt-2.5 pl-9 flex flex-col gap-2 max-w-2xl">
+          <textarea
+            rows={3}
+            value={editDraft}
+            onChange={(e) => setEditDraft(e.target.value)}
+            className="w-full text-sm bg-theme-surface border border-stone-500/30 rounded-xl p-3 text-theme-main focus:outline-none focus:border-[#dfba69] font-serif resize-y"
+          />
           <div className="flex gap-2">
-            <button type="submit" disabled={!editDraft.trim()} className="px-3 py-1 rounded-md text-xs font-semibold bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900 disabled:opacity-40">Save</button>
-            <button type="button" onClick={() => { setEditDraft(comment.text); setIsEditing(false); }} className="px-2.5 py-1 text-xs text-theme-muted">Cancel</button>
+            <button
+              type="submit"
+              disabled={!editDraft.trim()}
+              className="px-3.5 py-1.5 rounded-full text-xs font-sans font-semibold bg-[#dfba69] text-[#171410] disabled:opacity-40 cursor-pointer"
+            >
+              {isAmharic ? 'አስቀምጥ' : 'Save changes'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditDraft(comment.text);
+                setIsEditing(false);
+              }}
+              className="px-3 py-1.5 text-xs font-sans text-theme-muted hover:text-theme-main cursor-pointer"
+            >
+              {isAmharic ? 'ሰርዝ' : 'Cancel'}
+            </button>
           </div>
         </form>
       ) : (
-        <div className="mt-1.5 pl-8 sm:pl-9 text-sm text-theme-body leading-relaxed whitespace-pre-line font-serif">{comment.text}</div>
+        <div className="mt-1.5 pl-9 text-[15px] text-theme-body leading-relaxed whitespace-pre-line font-serif">
+          {comment.text}
+        </div>
       )}
 
-      {/* Compact, inline action row */}
-      <div className="mt-2 pl-8 sm:pl-9 flex items-center gap-4 text-xs text-theme-muted">
+      <div className="mt-2 pl-9 flex items-center gap-5 text-xs font-sans text-theme-muted">
         <button
           type="button"
           onClick={() => onToggleLike(comment.id)}
           className={`inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
-            isReplyLiked ? 'text-theme-accent font-medium' : 'hover:text-theme-main'
+            isReplyLiked ? 'text-[#dfba69] font-medium' : 'hover:text-theme-main'
           }`}
           title="Like reply"
         >
@@ -182,59 +314,45 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
           >
             thumb_up
           </span>
-          {displayLikes > 0 && (
-            <span className="tabular-nums text-xs">{displayLikes}</span>
-          )}
+          {displayLikes > 0 && <span className="tabular-nums text-xs">{displayLikes}</span>}
         </button>
-
-        {isAuthor && !isEditing && (
-          <>
-            <button type="button" onClick={() => { setEditDraft(comment.text); setIsEditing(true); onSetInlineReplyingId(null); }} className="font-medium hover:text-theme-main hover:underline transition-colors cursor-pointer">Edit</button>
-            <button type="button" onClick={() => { if (window.confirm('Delete this reply and its nested replies?')) void onDeleteReply(comment.id); }} className="font-medium text-red-600 hover:underline transition-colors cursor-pointer">Delete</button>
-          </>
-        )}
 
         <button
           type="button"
-          onClick={() => {
-            if (isReplyingHere) {
-              onSetInlineReplyingId(null);
-            } else {
-              onSetInlineReplyingId(comment.id);
-            }
-          }}
-          className="font-medium hover:text-theme-main hover:underline transition-colors cursor-pointer"
+          onClick={() => onSetInlineReplyingId(isReplyingHere ? null : comment.id)}
+          className="font-medium hover:text-theme-main transition-colors cursor-pointer"
         >
-          {isReplyingHere ? (isAmharic ? 'ሰርዝ' : 'Cancel') : (isAmharic ? 'መልስ ስጥ' : 'Reply')}
+          {isReplyingHere ? (isAmharic ? 'ሰርዝ' : 'Cancel') : isAmharic ? 'መልስ ስጥ' : 'Reply'}
         </button>
       </div>
 
-      {/* Inline Quick Reply Box directly under this comment */}
       {isReplyingHere && (
         <form
           onSubmit={handleInlineSubmit}
-          className="mt-2.5 pl-8 sm:pl-9 flex flex-col gap-2 max-w-xl animate-in fade-in duration-150"
+          className="mt-3 pl-9 flex flex-col gap-2 max-w-2xl animate-in fade-in duration-150"
         >
           <textarea
             ref={inlineInputRef}
             rows={2}
             value={inlineText}
             onChange={(e) => setInlineText(e.target.value)}
-            placeholder={isAmharic ? `ለ${comment.author} መልስ ስጥ...` : `Reply to ${comment.author}...`}
-            className="w-full text-sm bg-transparent border border-stone-300 dark:border-stone-700 rounded-lg p-2.5 text-theme-main placeholder:text-stone-400 focus:outline-none focus:border-stone-500 font-serif resize-none shadow-2xs"
+            placeholder={
+              isAmharic ? `ለ${comment.author} መልስ ስጥ...` : `Reply to ${comment.author}...`
+            }
+            className="w-full text-sm bg-theme-surface border border-stone-500/30 rounded-xl p-3 text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-[#dfba69] font-serif resize-none"
           />
           <div className="flex items-center gap-2">
             <button
               type="submit"
               disabled={!inlineText.trim()}
-              className="px-3 py-1 bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900 rounded-md text-xs font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity cursor-pointer shadow-2xs"
+              className="px-3.5 py-1.5 bg-[#dfba69] text-[#171410] rounded-full text-xs font-sans font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity cursor-pointer"
             >
-              {isAmharic ? 'መልስ' : 'Reply'}
+              {isAmharic ? 'መልስ' : 'Post Reply'}
             </button>
             <button
               type="button"
               onClick={() => onSetInlineReplyingId(null)}
-              className="px-2.5 py-1 text-xs text-theme-muted hover:text-theme-main transition-colors cursor-pointer"
+              className="px-2.5 py-1.5 text-xs font-sans text-theme-muted hover:text-theme-main transition-colors cursor-pointer"
             >
               {isAmharic ? 'ሰርዝ' : 'Cancel'}
             </button>
@@ -242,13 +360,13 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
         </form>
       )}
 
-      {/* Deep, Nested Comment Guide Line & Indentation Architecture */}
       {comment.replies && comment.replies.length > 0 && (
-        <div className="relative mt-3 pl-3.5 sm:pl-5 ml-3 sm:ml-3.5 border-l border-black/12 dark:border-white/12 hover:border-black/25 dark:hover:border-white/25 transition-colors space-y-4">
+        <div className="relative mt-4 pl-4 sm:pl-5 ml-3.5 border-l border-stone-500/25 hover:border-[#dfba69]/50 transition-colors space-y-5">
           {comment.replies.map((child) => (
             <NestedCommentItem
               key={child.id}
               comment={child}
+              postAuthorName={postAuthorName}
               depth={depth + 1}
               likedReplies={likedReplies}
               currentUser={currentUser}
@@ -271,35 +389,66 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
   targetQuestionId,
   onClearTargetQuestion,
   onNavigate,
-  onShowToast
+  onShowToast,
 }) => {
   const { t, isAmharic } = useLanguage();
   const queryClient = useQueryClient();
-  // Do not share this key with HomeFeedView's ordinary useQuery: infinite queries
-  // require an { pages, pageParams } cache shape.
   const discussionsKey = ['discussion-feed'] as const;
 
-  // Navigation & View Mode
   const [activeThreadId, setActiveThreadId] = useState<string | null>(targetQuestionId || null);
 
-  // Search & Filter state
+  // Feed Search & Filter state
   const [selectedTopic, setSelectedTopic] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'discussed'>('recent');
 
-  // Interactive local states
+  // Thread Detail UI state
+  const [threadSort, setThreadSort] = useState<'top' | 'newest'>('top');
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [threadMenuOpen, setThreadMenuOpen] = useState(false);
+  const [confirmThreadDelete, setConfirmThreadDelete] = useState(false);
+  const threadMenuRef = useRef<HTMLDivElement>(null);
+
   const [likedQuestions, setLikedQuestions] = useState<Record<string, boolean>>({});
   const [likedReplies, setLikedReplies] = useState<Record<string, boolean>>({});
   const { isSaved, toggle: toggleSave } = useBookmarks(currentUser?.id, 'post', onShowToast);
 
-  const { data: discussionsData, isPending, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
+  const toQuestion = React.useCallback(
+    (post: any, replies: QuestionReply[] = []): Question => ({
+      id: post.id,
+      author: post.author?.name || 'Reader',
+      authorAvatar: post.author?.avatar_url || '',
+      timeAgo: formatEditorialDate(post.created_at),
+      createdAt: post.created_at,
+      topic: (post.topic || 'Reflections') as Question['topic'],
+      title: post.title || 'Discussion',
+      body: post.content || '',
+      repliesCount: Number(post.reply_count ?? replies.length),
+      likesCount: Number(post.like_count ?? post.likesCount ?? 0),
+      replies,
+    }),
+    []
+  );
+
+  const {
+    data: discussionsData,
+    isPending: isFeedPending,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: discussionsKey,
+    staleTime: 60_000,
     initialPageParam: undefined as { created_at: string; id: string } | undefined,
     queryFn: async ({ pageParam }) => {
       const posts = await loadDiscussionPage(pageParam);
+      if (!posts.length) return [];
+      const postIds = posts.map((post) => post.id);
       const [likedIds, topicsByPost] = await Promise.all([
-        loadCurrentUserPostLikes(posts.map((post) => post.id), currentUser?.id),
-        loadDiscussionTopics(posts.map((post) => post.id)),
+        currentUser?.id
+          ? loadCurrentUserPostLikes(postIds, currentUser.id)
+          : Promise.resolve(EMPTY_LIKED_IDS),
+        loadDiscussionTopics(postIds),
       ]);
       return posts.map((post) => ({
         ...toQuestion(post),
@@ -307,74 +456,84 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
         userLiked: likedIds.has(post.id),
       }));
     },
-    getNextPageParam: (lastPage) => lastPage.length === 20
-      ? { created_at: lastPage[lastPage.length - 1].createdAt || '', id: lastPage[lastPage.length - 1].id }
-      : undefined,
+    getNextPageParam: (lastPage) =>
+      lastPage.length === 20
+        ? {
+            created_at: lastPage[lastPage.length - 1].createdAt || '',
+            id: lastPage[lastPage.length - 1].id,
+          }
+        : undefined,
   });
-  const questions = useMemo<Question[]>(() => discussionsData?.pages.flat() ?? [], [discussionsData]);
+
+  const questions = useMemo<Question[]>(
+    () => discussionsData?.pages.flat() ?? [],
+    [discussionsData]
+  );
+
   const updateFeed = (update: (question: Question) => Question | null) => {
-    queryClient.setQueryData<any>(discussionsKey, (old: any) => old ? {
-      ...old,
-      pages: old.pages.map((page: Question[]) => page.flatMap((question) => {
-        const next = update(question);
-        return next ? [next] : [];
-      })),
-    } : old);
+    queryClient.setQueryData<any>(discussionsKey, (old: any) =>
+      old
+        ? {
+            ...old,
+            pages: old.pages.map((page: Question[]) =>
+              page.flatMap((question) => {
+                const next = update(question);
+                return next ? [next] : [];
+              })
+            ),
+          }
+        : old
+    );
   };
 
-  const { data: threadData = [] } = useQuery({
+  const { data: threadData = [], isPending: isThreadPending } = useQuery({
     queryKey: ['discussion-thread', activeThreadId],
     queryFn: () => loadThreadRepliesWithAuthors(activeThreadId!),
     enabled: Boolean(activeThreadId),
+    staleTime: 30_000,
   });
+
   const { data: threadLikedIds = EMPTY_LIKED_IDS } = useQuery({
     queryKey: ['discussion-thread-likes', activeThreadId, currentUser?.id],
-    queryFn: () => loadCurrentUserPostLikes(threadData.map((reply) => reply.id), currentUser?.id),
+    queryFn: () =>
+      loadCurrentUserPostLikes(
+        threadData.map((reply) => reply.id),
+        currentUser?.id
+      ),
     enabled: Boolean(activeThreadId && currentUser?.id && threadData.length),
+    staleTime: 30_000,
   });
 
   useEffect(() => {
     if (!questions.length) return;
-
     const myLikes: Record<string, boolean> = {};
-    const myReplyLikes: Record<string, boolean> = {};
-
-    const collectReplies = (replies: QuestionReply[] = []) => {
-      replies.forEach((reply) => {
-        if (reply.userLiked) myReplyLikes[reply.id] = true;
-        collectReplies(reply.replies);
-      });
-    };
-
     questions.forEach((q) => {
       if ((q as any).userLiked) myLikes[q.id] = true;
-      collectReplies(q.replies);
     });
-
     setLikedQuestions(myLikes);
-    setLikedReplies(myReplyLikes);
   }, [questions]);
 
   useEffect(() => {
     setLikedReplies(Object.fromEntries([...threadLikedIds].map((id) => [id, true])));
   }, [threadLikedIds]);
 
-  const countRemovedReplies = (replies: QuestionReply[] = [], replyId: string): number => {
-    const countTree = (items: QuestionReply[]): number => items.reduce((total, item) => total + 1 + countTree(item.replies ?? []), 0);
-    for (const reply of replies) {
-      if (reply.id === replyId) return countTree([reply]);
-      const nestedCount = countRemovedReplies(reply.replies ?? [], replyId);
-      if (nestedCount) return nestedCount;
-    }
-    return 0;
-  };
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (threadMenuRef.current && !threadMenuRef.current.contains(event.target as Node)) {
+        setThreadMenuOpen(false);
+        setConfirmThreadDelete(false);
+      }
+    };
+    if (threadMenuOpen) document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [threadMenuOpen]);
 
   const deleteDiscussionMutation = useMutation({
     mutationFn: (id: string) => deleteDiscussion(id, currentUser!.id),
     onMutate: async (id) => {
       await queryClient.cancelQueries({ queryKey: discussionsKey });
       const previous = queryClient.getQueryData(discussionsKey);
-      updateFeed((q) => q.id === id ? null : q);
+      updateFeed((q) => (q.id === id ? null : q));
       return { previous };
     },
     onError: (_error, _id, context) => {
@@ -382,9 +541,10 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       onShowToast('Failed to delete. Restored.');
     },
   });
+
   const deleteReplyMutation = useMutation({
     mutationFn: (replyId: string) => deleteDiscussionReply(replyId, currentUser!.id),
-    onMutate: async (replyId) => {
+    onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: discussionsKey });
       const previous = queryClient.getQueryData(discussionsKey);
       return { previous };
@@ -393,13 +553,24 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       if (context?.previous) queryClient.setQueryData(discussionsKey, context.previous);
       onShowToast('Failed to delete reply. Restored.');
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['discussion-thread', activeThreadId] }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ['discussion-thread', activeThreadId] }),
   });
+
   const createDiscussionMutation = useMutation({
     mutationFn: (data: { title: string; body: string; topic: string }) =>
       createDiscussion(currentUser!.id, data.title, data.body, data.topic),
-    onSuccess: (created) => {
-      queryClient.setQueryData<any>(discussionsKey, (old: any) => old ? { ...old, pages: old.pages.map((page: Question[], index: number) => index === 0 ? [toQuestion(created), ...page] : page) } : old);
+    onSuccess: (created, variables) => {
+      queryClient.setQueryData<any>(discussionsKey, (old: any) =>
+        old
+          ? {
+              ...old,
+              pages: old.pages.map((page: Question[], index: number) =>
+                index === 0 ? [toQuestion({ ...created, topic: variables.topic }), ...page] : page
+              ),
+            }
+          : old
+      );
       onShowToast('Question posted!');
       setActiveThreadId(created.id);
       setNewTitle('');
@@ -410,20 +581,17 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     onError: (error: any) => onShowToast(error?.message || 'Could not post question.'),
   });
 
-  // Inline replying
   const [inlineReplyingId, setInlineReplyingId] = useState<string | null>(null);
-
-  // Thread Reply dock state
   const [threadReplyInput, setThreadReplyInput] = useState('');
-  const [replyingTo, setReplyingTo] = useState<{ replyId: string; author: string } | null>(null);
-  const replyInputRef = useRef<HTMLInputElement>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Modal for question create & edit
   const [isNewQuestionModalOpen, setIsNewQuestionModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newBody, setNewBody] = useState('');
-  const [newTopic, setNewTopic] = useState<'Early Texts' | 'Philosophy' | 'Reflections' | 'History'>('Early Texts');
+  const [newTopic, setNewTopic] = useState<'Early Texts' | 'Philosophy' | 'Reflections' | 'History'>(
+    'Early Texts'
+  );
 
   const topics = ['All', 'Early Texts', 'Philosophy', 'Reflections', 'History'];
 
@@ -434,31 +602,73 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     }
   }, [targetQuestionId]);
 
-  const toQuestion = useCallback((post: any, replies: QuestionReply[] = []): Question => ({
-    id: post.id,
-    author: post.author?.name || 'Reader',
-    authorAvatar: post.author?.avatar_url || '',
-    timeAgo: post.created_at ? new Date(post.created_at).toLocaleDateString() : '',
-    createdAt: post.created_at,
-    topic: (post.topic || 'Reflections') as Question['topic'],
-    title: post.title || 'Discussion',
-    body: post.content || '',
-    repliesCount: Number(post.reply_count ?? replies.length),
-    likesCount: Number(post.like_count ?? post.likesCount ?? 0),
-    replies,
-  }), []);
-
   const activeQuestion = questions.find((q) => q.id === activeThreadId);
+
   const threadReplies = useMemo(() => {
     const byParent = new Map<string, typeof threadData>();
-    threadData.forEach((reply) => byParent.set(reply.parent_id!, [...(byParent.get(reply.parent_id!) ?? []), reply]));
-    const build = (parentId: string): QuestionReply[] => (byParent.get(parentId) ?? []).map((reply) => ({
-      id: reply.id, author: reply.author?.name || 'Reader', authorAvatar: reply.author?.avatar_url || '',
-      timeAgo: new Date(reply.created_at).toLocaleDateString(), text: reply.content,
-      likesCount: reply.like_count, userLiked: likedReplies[reply.id] ?? threadLikedIds.has(reply.id), replies: build(reply.id),
-    }));
-    return activeThreadId ? build(activeThreadId) : [];
-  }, [activeThreadId, likedReplies, threadData, threadLikedIds]);
+    threadData.forEach((reply) =>
+      byParent.set(reply.parent_id!, [...(byParent.get(reply.parent_id!) ?? []), reply])
+    );
+
+    const build = (parentId: string): QuestionReply[] =>
+      (byParent.get(parentId) ?? []).map((reply) => ({
+        id: reply.id,
+        author: reply.author?.name || 'Reader',
+        authorAvatar: reply.author?.avatar_url || '',
+        timeAgo: formatEditorialDate(reply.created_at),
+        text: reply.content,
+        likesCount: reply.like_count,
+        userLiked: likedReplies[reply.id] ?? threadLikedIds.has(reply.id),
+        replies: build(reply.id),
+      }));
+
+    const rootReplies = activeThreadId ? build(activeThreadId) : [];
+
+    if (threadSort === 'top') {
+      return [...rootReplies].sort((a, b) => (b.likesCount || 0) - (a.likesCount || 0));
+    }
+    return [...rootReplies].reverse();
+  }, [activeThreadId, likedReplies, threadData, threadLikedIds, threadSort]);
+
+  const discussionParticipants = useMemo(() => {
+    if (!activeQuestion) return [];
+    const counts = new Map<string, { name: string; avatar?: string; count: number }>();
+
+    const addParticipant = (name: string, avatar?: string) => {
+      const key = name.trim();
+      if (!key) return;
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        counts.set(key, { name: key, avatar, count: 1 });
+      }
+    };
+
+    addParticipant(activeQuestion.author, activeQuestion.authorAvatar);
+
+    const walkReplies = (items: QuestionReply[]) => {
+      items.forEach((item) => {
+        addParticipant(item.author, item.authorAvatar);
+        if (item.replies?.length) walkReplies(item.replies);
+      });
+    };
+    walkReplies(threadReplies);
+
+    return Array.from(counts.values());
+  }, [activeQuestion, threadReplies]);
+
+  const keepReadingThreads = useMemo(() => {
+    if (!activeQuestion) return [];
+    const candidates = questions.filter(
+      (q) =>
+        q.id !== activeQuestion.id &&
+        !q.title.toLowerCase().startsWith('discussion:')
+    );
+    const sameTopic = candidates.filter((q) => q.topic === activeQuestion.topic);
+    const otherTopics = candidates.filter((q) => q.topic !== activeQuestion.topic);
+    return [...sameTopic, ...otherTopics].slice(0, 3);
+  }, [activeQuestion, questions]);
 
   const isAuthor = (q: Question) => {
     if (!currentUser?.name || !q.author) return false;
@@ -467,66 +677,96 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
 
   const handleOpenThread = (id: string) => {
     setActiveThreadId(id);
-    setReplyingTo(null);
     setInlineReplyingId(null);
     setThreadReplyInput('');
+    setComposerOpen(false);
+    setThreadMenuOpen(false);
+    setConfirmThreadDelete(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBackToFeed = () => {
     setActiveThreadId(null);
-    setReplyingTo(null);
     setInlineReplyingId(null);
     setThreadReplyInput('');
-    if (onClearTargetQuestion) {
-      onClearTargetQuestion();
-    }
+    setComposerOpen(false);
+    setThreadMenuOpen(false);
+    setConfirmThreadDelete(false);
+    if (onClearTargetQuestion) onClearTargetQuestion();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleOpenComposer = () => {
+    setComposerOpen(true);
+    setInlineReplyingId(null);
+    setTimeout(() => composerTextareaRef.current?.focus(), 40);
+  };
+
   const handleToggleLike = async (id: string) => {
-    if (!currentUser?.id) { onShowToast('You must be signed in to like a discussion.'); return; }
+    if (!currentUser?.id) {
+      onShowToast('You must be signed in to like a discussion.');
+      return;
+    }
     const isLiked = !!likedQuestions[id];
     try {
       await togglePostLike(id, currentUser.id, isLiked);
       setLikedQuestions((prev) => ({ ...prev, [id]: !isLiked }));
-      updateFeed((question) => question.id === id
-        ? { ...question, likesCount: Math.max(0, question.likesCount + (isLiked ? -1 : 1)) }
-        : question);
+      updateFeed((question) =>
+        question.id === id
+          ? { ...question, likesCount: Math.max(0, question.likesCount + (isLiked ? -1 : 1)) }
+          : question
+      );
       onShowToast(isLiked ? 'Like removed' : 'Liked discussion');
-    } catch (error: any) { onShowToast(error?.message || 'Could not update like.'); }
+    } catch (error: any) {
+      onShowToast(error?.message || 'Could not update like.');
+    }
   };
 
-  const updateReplyTree = (replies: QuestionReply[] = [], replyId: string, liked: boolean): QuestionReply[] => replies.map((reply) => {
-    if (reply.id === replyId) {
-      return { ...reply, userLiked: liked, likesCount: Math.max(0, (reply.likesCount ?? 0) + (liked ? 1 : -1)) };
-    }
-    return { ...reply, replies: updateReplyTree(reply.replies, replyId, liked) };
-  });
-
   const handleToggleReplyLike = async (replyId: string) => {
-    if (!currentUser?.id) { onShowToast('You must be signed in to like a reply.'); return; }
+    if (!currentUser?.id) {
+      onShowToast('You must be signed in to like a reply.');
+      return;
+    }
     const isLiked = !!likedReplies[replyId];
     try {
       await toggleReplyLike(replyId, currentUser.id, isLiked);
-      const nextLiked = !isLiked;
-      setLikedReplies((prev) => ({ ...prev, [replyId]: nextLiked }));
+      setLikedReplies((prev) => ({ ...prev, [replyId]: !isLiked }));
       onShowToast(isLiked ? 'Like removed' : 'Liked reply');
-    } catch (error: any) { onShowToast(error?.message || 'Could not update reply like.'); }
+    } catch (error: any) {
+      onShowToast(error?.message || 'Could not update reply like.');
+    }
   };
 
-  const handleDirectNestedReply = async (parentId: string, replyToAuthor: string, text: string) => {
-    if (!currentUser?.id) { onShowToast('You must be signed in to reply.'); return; }
+  const handleDirectNestedReply = async (
+    parentId: string,
+    replyToAuthor: string,
+    text: string
+  ) => {
+    if (!currentUser?.id) {
+      onShowToast('You must be signed in to reply.');
+      return;
+    }
     try {
       await createReply(currentUser.id, parentId, text);
       await queryClient.invalidateQueries({ queryKey: ['discussion-thread', activeThreadId] });
-      if (activeThreadId) updateFeed((question) => question.id === activeThreadId ? { ...question, repliesCount: question.repliesCount + 1 } : question);
+      if (activeThreadId) {
+        updateFeed((question) =>
+          question.id === activeThreadId
+            ? { ...question, repliesCount: question.repliesCount + 1 }
+            : question
+        );
+      }
       onShowToast(`Replied to ${replyToAuthor}`);
-    } catch (error: any) { onShowToast(error?.message || 'Could not post reply.'); }
+    } catch (error: any) {
+      onShowToast(error?.message || 'Could not post reply.');
+    }
   };
 
   const handleEditNestedReply = async (replyId: string, content: string) => {
-    if (!currentUser?.id) { onShowToast('You must be signed in to edit a reply.'); throw new Error('Sign in required'); }
+    if (!currentUser?.id) {
+      onShowToast('You must be signed in to edit a reply.');
+      throw new Error('Sign in required');
+    }
     try {
       await updateDiscussionReply(replyId, currentUser.id, content);
       await queryClient.invalidateQueries({ queryKey: ['discussion-thread', activeThreadId] });
@@ -538,35 +778,42 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
   };
 
   const handleDeleteNestedReply = async (replyId: string) => {
-    if (!currentUser?.id) { onShowToast('You must be signed in to delete a reply.'); return; }
+    if (!currentUser?.id) {
+      onShowToast('You must be signed in to delete a reply.');
+      return;
+    }
     onShowToast('Reply deleted');
     try {
       await deleteReplyMutation.mutateAsync(replyId);
-    } catch (error: any) {
-      // Error toast and cache rollback are handled by the mutation.
+    } catch {
+      // Handled by mutation
     }
   };
 
-  const handleCancelReplyingTo = () => {
-    setReplyingTo(null);
-    setThreadReplyInput('');
-  };
-
-  const handleSubmitThreadReply = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmitThreadReply = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!activeQuestion) return;
     const text = threadReplyInput.trim();
     if (!text) return;
 
-    if (!currentUser?.id) { onShowToast('You must be signed in to reply.'); return; }
+    if (!currentUser?.id) {
+      onShowToast('You must be signed in to reply.');
+      return;
+    }
     try {
-      await createReply(currentUser.id, replyingTo?.replyId || activeQuestion.id, text);
+      await createReply(currentUser.id, activeQuestion.id, text);
       await queryClient.invalidateQueries({ queryKey: ['discussion-thread', activeThreadId] });
-      updateFeed((question) => question.id === activeQuestion.id ? { ...question, repliesCount: question.repliesCount + 1 } : question);
-      onShowToast(replyingTo ? `Replied to ${replyingTo.author}` : 'Reflection posted to thread');
+      updateFeed((question) =>
+        question.id === activeQuestion.id
+          ? { ...question, repliesCount: question.repliesCount + 1 }
+          : question
+      );
+      onShowToast('Reflection posted to thread');
       setThreadReplyInput('');
-      setReplyingTo(null);
-    } catch (error: any) { onShowToast(error?.message || 'Could not post reply.'); }
+      setComposerOpen(false);
+    } catch (error: any) {
+      onShowToast(error?.message || 'Could not post reply.');
+    }
   };
 
   const handleOpenNewQuestion = () => {
@@ -589,8 +836,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     setIsNewQuestionModalOpen(true);
   };
 
-  const handleDeleteQuestion = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleConfirmDeleteQuestion = async (id: string) => {
     const target = questions.find((item) => item.id === id);
     if (target && !isAuthor(target)) {
       onShowToast('You can only delete questions you authored.');
@@ -600,14 +846,13 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
       onShowToast('You must be signed in to delete a discussion.');
       return;
     }
-    if (!window.confirm('Are you sure you want to delete this?')) return;
 
     if (activeThreadId === id) handleBackToFeed();
     try {
       await deleteDiscussionMutation.mutateAsync(id);
       onShowToast('Discussion deleted');
-    } catch (error) {
-      // Error toast and cache rollback are handled by the mutation.
+    } catch {
+      // Handled by mutation
     }
   };
 
@@ -621,8 +866,18 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
         return;
       }
       try {
-        await updateDiscussion(editingQuestion.id, currentUser.id, newTitle, newBody, newTopic);
-        updateFeed((question) => question.id === editingQuestion.id ? { ...question, title: newTitle, body: newBody, topic: newTopic } : question);
+        await updateDiscussion(
+          editingQuestion.id,
+          currentUser.id,
+          newTitle,
+          newBody,
+          newTopic
+        );
+        updateFeed((question) =>
+          question.id === editingQuestion.id
+            ? { ...question, title: newTitle, body: newBody, topic: newTopic }
+            : question
+        );
         onShowToast('Discussion updated');
       } catch (error: any) {
         onShowToast(error?.message || 'Could not update discussion.');
@@ -634,7 +889,11 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
         return;
       }
 
-      await createDiscussionMutation.mutateAsync({ title: newTitle, body: newBody, topic: newTopic });
+      await createDiscussionMutation.mutateAsync({
+        title: newTitle,
+        body: newBody,
+        topic: newTopic,
+      });
     }
 
     setNewTitle('');
@@ -672,263 +931,457 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
     });
   }, [questions, selectedTopic, searchQuery, sortBy]);
 
+  const totalDisplayedContributions = Math.max(
+    activeQuestion?.repliesCount || 0,
+    countAllReplies(threadReplies)
+  );
+
+  if (activeThreadId && !activeQuestion && isFeedPending) {
+    return (
+      <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-20">
+        <div className="max-w-5xl xl:max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-10 lg:gap-12 animate-pulse">
+            <div className="space-y-5">
+              <div className="h-4 w-32 rounded bg-theme-subtle" />
+              <div className="h-48 rounded-2xl bg-theme-surface border border-stone-500/20" />
+              <div className="h-24 rounded-xl bg-theme-subtle/50" />
+            </div>
+            <div className="space-y-4 lg:border-l lg:border-stone-500/20 lg:pl-8">
+              <div className="h-4 w-32 rounded bg-theme-subtle" />
+              <div className="h-6 w-full rounded bg-theme-subtle" />
+              <div className="h-6 w-full rounded bg-theme-subtle" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col min-h-screen bg-theme-app text-theme-body pt-16 pb-28 md:pb-16 transition-colors duration-200">
-      <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6">
-        
-       {activeQuestion ? (
-          <div className="flex flex-col gap-6 animate-in fade-in duration-200">
-            <div className="flex items-center justify-between pb-2 border-b border-theme/60">
-              <button
-                type="button"
-                onClick={handleBackToFeed}
-                className="inline-flex items-center gap-2 text-xs sm:text-sm font-serif font-semibold text-theme-main hover:text-theme-accent transition-colors cursor-pointer group py-1"
-              >
-                <span className="material-symbols-outlined text-[18px] group-hover:-translate-x-0.5 transition-transform">
-                  arrow_back
-                </span>
-                <span>{isAmharic ? 'ሁሉም ውይይቶች' : 'All Discussions'}</span>
-              </button>
-
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-theme-muted font-sans font-medium">
-                  {activeQuestion.topic}
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(window.location.href);
-                    onShowToast('Thread link copied to clipboard');
-                  }}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                  title="Share thread"
-                >
-                  <span className="material-symbols-outlined text-[17px]">share</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => toggleSave(activeQuestion.id)}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-                    isSaved(activeQuestion.id)
-                      ? 'text-theme-gold'
-                      : 'text-theme-muted hover:text-theme-main hover:bg-theme-subtle'
-                  }`}
-                >
-                  <span
-                    className="material-symbols-outlined text-[19px]"
-                    style={{ fontVariationSettings: isSaved(activeQuestion.id) ? "'FILL' 1" : "'FILL' 0" }}
-                  >
-                    bookmark
-                  </span>
-                </button>
-
-                {isAuthor(activeQuestion) && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditQuestion(activeQuestion)}
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[17px]">edit</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteQuestion(activeQuestion.id, e)}
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-theme-muted hover:text-red-600 hover:bg-red-500/10 transition-colors cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[17px]">delete</span>
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <article className="bg-theme-surface rounded-xl sm:rounded-2xl p-5 sm:p-7 border border-theme/60 shadow-2xs flex flex-col gap-4">
+      <div
+        className={`${
+          activeQuestion ? 'max-w-5xl xl:max-w-6xl' : 'max-w-4xl xl:max-w-5xl'
+        } mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6`}
+      >
+        {activeQuestion ? (
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-10 lg:gap-12 items-start animate-in fade-in duration-150">
+            {/* PRIMARY LEFT COLUMN */}
+            <div className="flex flex-col gap-6 min-w-0">
+              {/* Top Navigation & Passive Actions Bar */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5 text-sm">
-                  <AvatarWithFallback
-                    src={activeQuestion.authorAvatar}
-                    name={activeQuestion.author}
-                    sizeClass="w-8 h-8"
-                  />
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-sm sm:text-base text-theme-main">
-                      {activeQuestion.author}
-                    </span>
-                    <span className="text-xs text-theme-muted">
-                      {activeQuestion.timeAgo}
-                    </span>
-                    {isAuthor(activeQuestion) && (
-                      <span className="text-[10px] uppercase font-sans tracking-wider px-1.5 py-0.5 rounded bg-theme-accent-light text-theme-accent font-semibold">
-                        Author
-                      </span>
-                    )}
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleBackToFeed}
+                  className="inline-flex items-center gap-2 text-xs sm:text-sm font-sans text-theme-muted hover:text-theme-main transition-colors cursor-pointer group"
+                >
+                  <span className="material-symbols-outlined text-[16px] group-hover:-translate-x-0.5 transition-transform">
+                    arrow_back
+                  </span>
+                  <span>{isAmharic ? 'ሁሉም ውይይቶች' : 'All discussions'}</span>
+                </button>
 
-                {activeQuestion.bookTitle && (
-                  <div className="hidden sm:flex items-center gap-1.5 text-xs text-theme-muted font-serif">
-                    <span className="material-symbols-outlined text-[15px] text-theme-accent">menu_book</span>
-                    <span>{activeQuestion.bookTitle}</span>
-                  </div>
-                )}
-              </div>
-
-              <h1 className="font-serif text-[22px] sm:text-[26px] font-bold text-theme-main leading-snug">
-                {activeQuestion.title}
-              </h1>
-
-              <div className="font-serif text-sm sm:text-base text-theme-body leading-relaxed whitespace-pre-line space-y-3">
-                {activeQuestion.body}
-              </div>
-
-              <div className="pt-3 border-t border-theme/50 flex items-center justify-between text-xs sm:text-sm text-theme-muted">
-                <div className="flex items-center gap-4 sm:gap-6">
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => handleToggleLike(activeQuestion.id)}
-                    className={`inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
-                      likedQuestions[activeQuestion.id]
-                        ? 'text-theme-accent font-medium'
-                        : 'hover:text-theme-main'
+                    onClick={() => {
+                      navigator.clipboard?.writeText(window.location.href);
+                      onShowToast('Thread link copied to clipboard');
+                    }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
+                    title="Share thread"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">share</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => toggleSave(activeQuestion.id)}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+                      isSaved(activeQuestion.id)
+                        ? 'text-[#dfba69]'
+                        : 'text-theme-muted hover:text-theme-main hover:bg-theme-subtle'
                     }`}
+                    title="Bookmark discussion"
                   >
                     <span
                       className="material-symbols-outlined text-[18px]"
-                      style={{ fontVariationSettings: likedQuestions[activeQuestion.id] ? "'FILL' 1" : "'FILL' 0" }}
+                      style={{
+                        fontVariationSettings: isSaved(activeQuestion.id) ? "'FILL' 1" : "'FILL' 0",
+                      }}
                     >
-                      thumb_up
-                    </span>
-                    <span className="tabular-nums">
-                      {activeQuestion.likesCount}{' '}
-                      {isAmharic ? 'መውደዶች' : 'Likes'}
+                      bookmark
                     </span>
                   </button>
 
-                  <div className="inline-flex items-center gap-1.5 text-theme-muted">
-                    <span className="material-symbols-outlined text-[18px]">chat_bubble_outline</span>
-                    <span>{activeQuestion.repliesCount} {isAmharic ? 'አስተያየቶች' : 'Contributions'}</span>
-                  </div>
-                </div>
+                  {isAuthor(activeQuestion) && (
+                    <div ref={threadMenuRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setThreadMenuOpen((prev) => !prev);
+                          setConfirmThreadDelete(false);
+                        }}
+                        aria-label="Discussion options"
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">more_horiz</span>
+                      </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setReplyingTo(null);
-                    setInlineReplyingId(null);
-                    replyInputRef.current?.focus();
-                  }}
-                  className="font-medium text-xs sm:text-sm text-theme-accent hover:underline cursor-pointer"
-                >
-                  {isAmharic ? 'አስተያየት ጻፍ' : 'Write Reflection'}
-                </button>
+                      {threadMenuOpen && (
+                        <div className="absolute right-0 top-9 z-30 w-48 rounded-xl bg-theme-surface border border-stone-500/25 shadow-2xl py-1.5 text-xs font-sans">
+                          {!confirmThreadDelete ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setThreadMenuOpen(false);
+                                  handleOpenEditQuestion(activeQuestion);
+                                }}
+                                className="w-full px-3.5 py-2 text-left text-theme-main hover:bg-theme-subtle flex items-center gap-2 cursor-pointer"
+                              >
+                                <span className="material-symbols-outlined text-[15px]">edit</span>
+                                <span>{isAmharic ? 'ጥያቄ አስተካክል' : 'Edit discussion'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmThreadDelete(true)}
+                                className="w-full px-3.5 py-2 text-left text-red-400 hover:bg-red-500/10 flex items-center gap-2 cursor-pointer"
+                              >
+                                <span className="material-symbols-outlined text-[15px]">delete</span>
+                                <span>{isAmharic ? 'ጥያቄ አጥፋ' : 'Delete discussion'}</span>
+                              </button>
+                            </>
+                          ) : (
+                            <div className="px-3.5 py-2 space-y-2">
+                              <p className="text-[11px] text-theme-muted leading-snug">
+                                {isAmharic
+                                  ? 'ይህን ውይይት በቋሚነት ማጥፋት ይፈልጋሉ?'
+                                  : 'Permanently delete this discussion?'}
+                              </p>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setThreadMenuOpen(false);
+                                    setConfirmThreadDelete(false);
+                                    void handleConfirmDeleteQuestion(activeQuestion.id);
+                                  }}
+                                  className="flex-1 py-1 px-2 rounded bg-red-600 text-white font-semibold hover:bg-red-700 cursor-pointer"
+                                >
+                                  {isAmharic ? 'አዎ' : 'Delete'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmThreadDelete(false)}
+                                  className="flex-1 py-1 px-2 rounded bg-theme-subtle text-theme-main hover:opacity-80 cursor-pointer"
+                                >
+                                  {isAmharic ? 'ተው' : 'Cancel'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </article>
 
-            <section className="flex flex-col gap-4 mt-2">
-              <div className="flex items-center justify-between px-1 pb-1 border-b border-theme/40">
-                <h2 className="font-serif font-bold text-base sm:text-lg text-theme-main flex items-center gap-2">
-                  <span>{isAmharic ? 'የውይይት ፍሰት' : 'Discussion Stream'}</span>
-                  <span className="text-xs font-sans font-normal text-theme-muted">
-                    ({activeQuestion.repliesCount})
+              {/* Anchored Symposium Prompt Card */}
+              <article className="bg-theme-surface rounded-2xl p-6 sm:p-8 border border-[#c8a256]/25 shadow-sm flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs font-sans font-semibold tracking-wide text-[#dfba69]">
+                    {activeQuestion.topic}
                   </span>
-                </h2>
-              </div>
 
-              {threadReplies.length > 0 ? (
-                <div className="space-y-6 sm:space-y-7 pt-2">
-                  {threadReplies.map((reply) => (
-                    <NestedCommentItem
-                      key={reply.id}
-                      comment={reply}
-                      depth={0}
-                      likedReplies={likedReplies}
-                      currentUser={currentUser}
-                      onToggleLike={handleToggleReplyLike}
-                      onEditReply={handleEditNestedReply}
-                      onDeleteReply={handleDeleteNestedReply}
-                      inlineReplyingId={inlineReplyingId}
-                      onSetInlineReplyingId={setInlineReplyingId}
-                      onSubmitReply={handleDirectNestedReply}
-                    />
-                  ))}
+                  {activeQuestion.bookTitle && (
+                    <div className="flex items-center gap-1.5 text-xs text-theme-muted font-serif">
+                      <span className="material-symbols-outlined text-[14px] text-[#dfba69]">
+                        menu_book
+                      </span>
+                      <span>{activeQuestion.bookTitle}</span>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="py-12 text-center">
-                  <span className="material-symbols-outlined text-3xl text-theme-muted/50 mb-2">
-                    forum
-                  </span>
-                  <h3 className="font-serif text-base font-bold text-theme-main">
-                    {isAmharic ? 'እስካሁን ምንም አስተያየት የለም' : 'No reflections yet'}
-                  </h3>
-                  <p className="text-xs text-theme-muted mt-1 max-w-sm mx-auto font-sans">
-                    {isAmharic
-                      ? 'መልስ፣ ታሪካዊ ግንዛቤ ወይም ማሰላሰያ በማጋራት የመጀመሪያው አንባቢ ይሁኑ።'
-                      : 'Be the first reader to contribute an answer, historical insight, or dialectical reflection.'}
-                  </p>
-                </div>
-              )}
-            </section>
 
-            <div className="sticky bottom-16 md:bottom-6 z-20 pt-2">
-              <form
-                onSubmit={handleSubmitThreadReply}
-                className="bg-theme-surface/95 backdrop-blur-md border border-stone-300 dark:border-stone-700 rounded-2xl p-2.5 sm:p-3 shadow-xl transition-all"
-              >
-                {replyingTo && (
-                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-theme text-xs font-sans text-theme-accent">
-                    <span className="flex items-center gap-1.5 font-medium">
-                      <span className="material-symbols-outlined text-[15px]">reply</span>
-                      <span>Replying to @{replyingTo.author}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleCancelReplyingTo}
-                      className="text-theme-muted hover:text-theme-main p-0.5 rounded cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">close</span>
-                    </button>
+                <h1 className="font-serif text-[28px] sm:text-[34px] font-bold text-theme-main leading-[1.16] tracking-tight">
+                  {activeQuestion.title}
+                </h1>
+
+                {activeQuestion.body && (
+                  <div className="font-serif text-[15.5px] sm:text-[16.5px] text-theme-body/90 leading-relaxed whitespace-pre-line space-y-3">
+                    {activeQuestion.body}
                   </div>
                 )}
 
-                <div className="flex items-center gap-2.5">
+                {/* Author Byline */}
+                <div className="flex items-center gap-2.5 pt-1">
                   <AvatarWithFallback
-                    src={currentUser?.avatar}
-                    name={currentUser?.name || 'User'}
-                    sizeClass="w-8 h-8"
+                    src={activeQuestion.authorAvatar}
+                    name={activeQuestion.author}
+                    sizeClass="w-7 h-7"
                   />
+                  <span className="font-sans font-semibold text-sm text-theme-main">
+                    {activeQuestion.author}
+                  </span>
+                  {isAuthor(activeQuestion) && (
+                    <span className="text-[11px] font-sans px-2 py-0.5 rounded-full bg-[#362c1b] text-[#dfba69] border border-[#c8a256]/35 font-medium leading-none">
+                      Author
+                    </span>
+                  )}
+                  <span className="text-xs font-sans text-theme-muted">
+                    {activeQuestion.timeAgo}
+                  </span>
+                </div>
 
-                  <div className="flex-1 relative flex items-center">
-                    <input
-                      ref={replyInputRef}
-                      type="text"
-                      value={threadReplyInput}
-                      onChange={(e) => setThreadReplyInput(e.target.value)}
-                      placeholder={
-                        replyingTo
-                          ? `Contribute reflection to @${replyingTo.author}...`
-                          : 'Contribute a dialectical reflection or answer...'
-                      }
-                      className="w-full h-10 pl-3.5 pr-10 text-sm rounded-xl border border-stone-300 dark:border-stone-700 bg-transparent text-theme-main placeholder:text-stone-500 dark:placeholder:text-stone-400 focus:outline-none focus:border-stone-500 font-serif"
-                    />
-
+                {/* Soft Divider & Balanced Engagement Row */}
+                <div className="pt-4 mt-1 border-t border-stone-500/20 flex items-center justify-between gap-4 flex-wrap text-xs sm:text-sm font-sans">
+                  <div className="flex items-center gap-4">
                     <button
-                      type="submit"
-                      disabled={!threadReplyInput.trim()}
-                      className={`absolute right-1 w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
-                        threadReplyInput.trim()
-                          ? 'bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900 hover:opacity-90 active:scale-95 shadow-2xs'
-                          : 'text-stone-400 dark:text-stone-500'
+                      type="button"
+                      onClick={() => handleToggleLike(activeQuestion.id)}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border transition-colors cursor-pointer ${
+                        likedQuestions[activeQuestion.id]
+                          ? 'bg-[#362c1b] border-[#c8a256]/55 text-[#dfba69] font-semibold'
+                          : 'bg-theme-app/40 border-stone-500/25 text-[#dfba69] hover:border-[#c8a256]/50'
                       }`}
                     >
-                      <span className="material-symbols-outlined text-[18px]">send</span>
+                      <span
+                        className="material-symbols-outlined text-[15px]"
+                        style={{
+                          fontVariationSettings: likedQuestions[activeQuestion.id]
+                            ? "'FILL' 1"
+                            : "'FILL' 0",
+                        }}
+                      >
+                        thumb_up
+                      </span>
+                      <span className="tabular-nums">{activeQuestion.likesCount}</span>
                     </button>
+
+                    <div className="inline-flex items-center gap-1.5 text-theme-muted">
+                      <span className="material-symbols-outlined text-[16px]">
+                        chat_bubble_outline
+                      </span>
+                      <span>
+                        {totalDisplayedContributions}{' '}
+                        {isAmharic
+                          ? 'አስተያየቶች'
+                          : totalDisplayedContributions === 1
+                          ? 'contribution'
+                          : 'contributions'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleOpenComposer}
+                    className="px-4 py-1.5 rounded-full bg-[#dfba69] text-[#171410] font-semibold text-xs sm:text-[13px] hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer shadow-xs"
+                  >
+                    {isAmharic ? 'አስተያየት ጻፍ' : 'Write a reflection'}
+                  </button>
+                </div>
+              </article>
+
+              {/* Discussion Stream */}
+              <section className="flex flex-col gap-5 pt-1">
+                <div className="flex items-center justify-between pb-2.5 border-b border-stone-500/20">
+                  <h2 className="font-serif font-bold text-xl sm:text-[22px] text-theme-main flex items-baseline gap-2.5">
+                    <span>{isAmharic ? 'ውይይት' : 'Discussion'}</span>
+                    <span className="text-sm font-sans font-normal text-theme-muted">
+                      {totalDisplayedContributions}
+                    </span>
+                  </h2>
+
+                  {threadReplies.length > 1 && (
+                    <div className="flex items-center gap-1 text-xs font-sans">
+                      <button
+                        type="button"
+                        onClick={() => setThreadSort('top')}
+                        className={`px-2.5 py-1 rounded-full transition-colors cursor-pointer ${
+                          threadSort === 'top'
+                            ? 'bg-theme-subtle text-theme-main font-medium'
+                            : 'text-theme-muted hover:text-theme-main'
+                        }`}
+                      >
+                        {isAmharic ? 'ተወዳጅ' : 'Top'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setThreadSort('newest')}
+                        className={`px-2.5 py-1 rounded-full transition-colors cursor-pointer ${
+                          threadSort === 'newest'
+                            ? 'bg-theme-subtle text-theme-main font-medium'
+                            : 'text-theme-muted hover:text-theme-main'
+                        }`}
+                      >
+                        {isAmharic ? 'አዲስ' : 'Newest'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Inline Reflection Composer (Opens cleanly at top of Discussion stream) */}
+                {composerOpen && (
+                  <form
+                    onSubmit={handleSubmitThreadReply}
+                    className="rounded-2xl bg-theme-surface border border-[#c8a256]/40 p-4 flex flex-col gap-3 animate-in fade-in duration-150"
+                  >
+                    <div className="flex items-start gap-3">
+                      <AvatarWithFallback
+                        src={currentUser?.avatar}
+                        name={currentUser?.name || 'User'}
+                        sizeClass="w-7 h-7"
+                      />
+                      <textarea
+                        ref={composerTextareaRef}
+                        rows={4}
+                        maxLength={2500}
+                        value={threadReplyInput}
+                        onChange={(e) => setThreadReplyInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                            e.preventDefault();
+                            void handleSubmitThreadReply();
+                          }
+                        }}
+                        placeholder={
+                          isAmharic
+                            ? 'ታሪካዊ ግንዛቤ፣ ጥቅስ ወይም መልስ ያጋሩ...'
+                            : 'Share a dialectical reflection, textual citation, or answer...'
+                        }
+                        className="w-full text-sm sm:text-[15px] bg-transparent text-theme-main placeholder:text-theme-muted focus:outline-none font-serif resize-y"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2.5 border-t border-stone-500/20 pl-10">
+                      <span className="text-[11px] font-sans text-theme-muted">
+                        {threadReplyInput.length}/2500
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setComposerOpen(false);
+                            setThreadReplyInput('');
+                          }}
+                          className="px-3 py-1.5 text-xs font-sans text-theme-muted hover:text-theme-main cursor-pointer"
+                        >
+                          {isAmharic ? 'ሰርዝ' : 'Cancel'}
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={!threadReplyInput.trim()}
+                          className="px-4 py-1.5 rounded-full text-xs font-sans font-semibold bg-[#dfba69] text-[#171410] hover:opacity-90 disabled:opacity-40 transition-opacity cursor-pointer"
+                        >
+                          {isAmharic ? 'አስተያየት ላክ' : 'Post reflection'}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                )}
+
+                {isThreadPending && threadReplies.length === 0 ? (
+                  <div className="space-y-4 animate-pulse pt-2">
+                    <div className="h-16 rounded-xl bg-theme-subtle/60" />
+                    <div className="h-16 rounded-xl bg-theme-subtle/60" />
+                  </div>
+                ) : threadReplies.length > 0 ? (
+                  <div className="divide-y divide-stone-500/20">
+                    {threadReplies.map((reply, index) => (
+                      <div key={reply.id} className={index > 0 ? 'pt-6 mt-6' : ''}>
+                        <NestedCommentItem
+                          comment={reply}
+                          postAuthorName={activeQuestion.author}
+                          depth={0}
+                          likedReplies={likedReplies}
+                          currentUser={currentUser}
+                          onToggleLike={handleToggleReplyLike}
+                          onEditReply={handleEditNestedReply}
+                          onDeleteReply={handleDeleteNestedReply}
+                          inlineReplyingId={inlineReplyingId}
+                          onSetInlineReplyingId={setInlineReplyingId}
+                          onSubmitReply={handleDirectNestedReply}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-10 text-center rounded-2xl bg-theme-surface/50 border border-stone-500/20">
+                    <span className="material-symbols-outlined text-3xl text-theme-muted/50 mb-2">
+                      forum
+                    </span>
+                    <h3 className="font-serif text-base font-bold text-theme-main">
+                      {isAmharic ? 'እስካሁን ምንም አስተያየት የለም' : 'No reflections yet'}
+                    </h3>
+                    <p className="text-xs text-theme-muted mt-1 max-w-sm mx-auto font-sans">
+                      {isAmharic
+                        ? 'መልስ፣ ታሪካዊ ግንዛቤ ወይም ማሰላሰያ በማጋራት የመጀመሪያው አንባቢ ይሁኑ።'
+                        : 'Be the first reader to contribute an answer, historical insight, or dialectical reflection.'}
+                    </p>
+                  </div>
+                )}
+              </section>
+            </div>
+
+            {/* CONTEXTUAL RIGHT RAIL */}
+            <aside className="lg:sticky lg:top-24 flex flex-col gap-7 pt-1 lg:border-l lg:border-stone-500/20 lg:pl-8">
+              <div className="flex flex-col gap-3.5">
+                <h3 className="font-serif text-[15px] font-bold text-theme-main">
+                  {isAmharic ? 'በዚህ ውይይት ውስጥ' : 'In this discussion'}
+                </h3>
+                <div className="space-y-3">
+                  {discussionParticipants.map((participant) => (
+                    <div
+                      key={participant.name}
+                      className="flex items-center justify-between gap-2 text-xs font-sans"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <AvatarWithFallback
+                          src={participant.avatar}
+                          name={participant.name}
+                          sizeClass="w-6 h-6"
+                        />
+                        <span className="text-theme-main/90 font-medium truncate">
+                          {participant.name}
+                        </span>
+                      </div>
+                      <span className="text-theme-muted tabular-nums">{participant.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {keepReadingThreads.length > 0 && (
+                <div className="flex flex-col gap-4 pt-5 border-t border-stone-500/20">
+                  <h3 className="font-serif text-[15px] font-bold text-theme-main">
+                    {isAmharic ? 'ማንበብዎን ይቀጥሉ' : 'Keep reading'}
+                  </h3>
+                  <div className="divide-y divide-stone-500/20">
+                    {keepReadingThreads.map((related, idx) => (
+                      <button
+                        key={related.id}
+                        type="button"
+                        onClick={() => handleOpenThread(related.id)}
+                        className={`w-full text-left group cursor-pointer block ${
+                          idx > 0 ? 'pt-3.5' : ''
+                        } ${idx < keepReadingThreads.length - 1 ? 'pb-3.5' : ''}`}
+                      >
+                        <p className="font-serif text-sm font-bold text-theme-main group-hover:text-[#dfba69] transition-colors leading-snug">
+                          {related.title}
+                        </p>
+                        <p className="text-[11px] font-sans text-theme-muted mt-1">
+                          {related.topic} · {related.repliesCount}{' '}
+                          {related.repliesCount === 1 ? 'contribution' : 'contributions'}
+                        </p>
+                      </button>
+                    ))}
                   </div>
                 </div>
-              </form>
-            </div>
+              )}
+            </aside>
           </div>
         ) : (
           <>
@@ -969,7 +1422,11 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={isAmharic ? 'ውይይቶችን፣ ደራሲያንን ወይም ጥያቄዎችን ፈልግ...' : 'Search discussions, authors, or textual questions...'}
+                placeholder={
+                  isAmharic
+                    ? 'ውይይቶችን፣ ደራሲያንን ወይም ጥያቄዎችን ፈልግ...'
+                    : 'Search discussions, authors, or textual questions...'
+                }
                 className="w-full bg-theme-surface border border-[#d6d0c4] dark:border-stone-700 rounded-full pl-10 pr-4 py-2.5 text-xs sm:text-sm text-theme-main placeholder:text-stone-600 dark:placeholder:text-stone-300 focus:outline-none focus:border-stone-400 dark:focus:border-stone-500 shadow-2xs font-sans"
               />
               {searchQuery && (
@@ -1019,8 +1476,12 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 <span className="material-symbols-outlined text-[14px]">swap_vert</span>
                 <span>
                   {sortBy === 'recent'
-                    ? (isAmharic ? 'የቅርብ ጊዜ' : 'Recent')
-                    : (isAmharic ? 'ብዙ የተወያየበት' : 'Most Discussed')}
+                    ? isAmharic
+                      ? 'የቅርብ ጊዜ'
+                      : 'Recent'
+                    : isAmharic
+                    ? 'ብዙ የተወያየበት'
+                    : 'Most Discussed'}
                 </span>
               </button>
             </div>
@@ -1072,7 +1533,9 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       {q.bookTitle && (
                         <div className="flex items-center gap-1 text-[11px] text-theme-accent font-serif pt-0.5">
                           <span className="material-symbols-outlined text-[13px]">menu_book</span>
-                          <span className="truncate">{q.bookTitle} {q.chapter ? `• ${q.chapter}` : ''}</span>
+                          <span className="truncate">
+                            {q.bookTitle} {q.chapter ? `• ${q.chapter}` : ''}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -1087,8 +1550,12 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                           onClick={() => handleOpenThread(q.id)}
                           className="flex items-center gap-1 hover:text-theme-accent cursor-pointer font-sans"
                         >
-                          <span className="material-symbols-outlined text-[16px]">chat_bubble_outline</span>
-                          <span>{totalReplies} {isAmharic ? 'መልሶች' : 'Replies'}</span>
+                          <span className="material-symbols-outlined text-[16px]">
+                            chat_bubble_outline
+                          </span>
+                          <span>
+                            {totalReplies} {isAmharic ? 'መልሶች' : 'Replies'}
+                          </span>
                         </button>
 
                         <button
@@ -1138,15 +1605,22 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                     {isAmharic ? 'ምንም ውይይቶች አልተገኙም' : 'No discussions found'}
                   </h3>
                   <p className="text-xs text-theme-muted mt-1 font-sans">
-                    {isAmharic ? 'የፍለጋ መስፈርትዎን የሚያሟላ ምንም ውይይት አልተገኘም።' : 'No discussions matched your search criteria.'}
+                    {isAmharic
+                      ? 'የፍለጋ መስፈርትዎን የሚያሟላ ምንም ውይይት አልተገኘም።'
+                      : 'No discussions matched your search criteria.'}
                   </p>
                 </div>
               )}
             </div>
             {hasNextPage && !searchQuery && selectedTopic === 'All' && (
               <div className="col-span-full flex justify-center pt-3">
-                <button type="button" onClick={() => void fetchNextPage()} disabled={isFetchingNextPage} className="px-4 py-2 rounded-lg bg-theme-subtle text-theme-main text-xs font-semibold disabled:opacity-50">
-                  {isFetchingNextPage ? 'Loading…' : (isAmharic ? 'ተጨማሪ ጫን' : 'Load more')}
+                <button
+                  type="button"
+                  onClick={() => void fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  className="px-4 py-2 rounded-lg bg-theme-subtle text-theme-main text-xs font-semibold disabled:opacity-50"
+                >
+                  {isFetchingNextPage ? 'Loading…' : isAmharic ? 'ተጨማሪ ጫን' : 'Load more'}
                 </button>
               </div>
             )}
@@ -1178,8 +1652,12 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 </span>
                 <h3 className="font-serif text-lg font-bold text-theme-main">
                   {editingQuestion
-                    ? (isAmharic ? 'ጥያቄ አስተካክል' : 'Edit Question')
-                    : (isAmharic ? 'ጥያቄ ጠይቅ' : 'Ask a Question')}
+                    ? isAmharic
+                      ? 'ጥያቄ አስተካክል'
+                      : 'Edit Question'
+                    : isAmharic
+                    ? 'ጥያቄ ጠይቅ'
+                    : 'Ask a Question'}
                 </h3>
               </div>
               <button
@@ -1264,8 +1742,12 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 className="flex-1 py-2.5 rounded-lg bg-theme-main text-white font-label-md text-xs uppercase tracking-wider font-semibold cursor-pointer hover:bg-theme-main/90 transition-opacity"
               >
                 {editingQuestion
-                  ? (isAmharic ? 'ለውጦችን አስቀምጥ' : 'Save Changes')
-                  : (isAmharic ? 'ጥያቄ አስገባ' : 'Post Question')}
+                  ? isAmharic
+                    ? 'ለውጦችን አስቀምጥ'
+                    : 'Save Changes'
+                  : isAmharic
+                  ? 'ጥያቄ አስገባ'
+                  : 'Post Question'}
               </button>
             </div>
           </form>
