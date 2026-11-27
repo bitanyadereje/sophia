@@ -162,8 +162,17 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
     setIsEditing(false);
   };
 
+  const isRootCard = depth === 0;
+
   return (
-    <div id={`comment-${comment.id}`} className="relative group/comment">
+    <div
+      id={`comment-${comment.id}`}
+      className={
+        isRootCard
+          ? 'relative group/comment bg-theme-surface rounded-2xl p-4 sm:p-5 border border-[#c8a256]/15 shadow-2xs transition-colors'
+          : 'relative group/comment'
+      }
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 flex-wrap min-w-0">
           <AvatarWithFallback
@@ -271,7 +280,7 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
             rows={3}
             value={editDraft}
             onChange={(e) => setEditDraft(e.target.value)}
-            className="w-full text-sm bg-theme-surface border border-stone-500/30 rounded-xl p-3 text-theme-main focus:outline-none focus:border-[#dfba69] font-serif resize-y"
+            className="w-full text-sm bg-theme-app/50 border border-stone-500/30 rounded-xl p-3 text-theme-main focus:outline-none focus:border-[#dfba69] font-serif resize-y"
           />
           <div className="flex gap-2">
             <button
@@ -299,7 +308,7 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
         </div>
       )}
 
-      <div className="mt-2 pl-9 flex items-center gap-5 text-xs font-sans text-theme-muted">
+      <div className="mt-2.5 pl-9 flex items-center gap-5 text-xs font-sans text-theme-muted">
         <button
           type="button"
           onClick={() => onToggleLike(comment.id)}
@@ -339,7 +348,7 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
             placeholder={
               isAmharic ? `ለ${comment.author} መልስ ስጥ...` : `Reply to ${comment.author}...`
             }
-            className="w-full text-sm bg-theme-surface border border-stone-500/30 rounded-xl p-3 text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-[#dfba69] font-serif resize-none"
+            className="w-full text-sm bg-theme-app/50 border border-stone-500/30 rounded-xl p-3 text-theme-main placeholder:text-theme-muted focus:outline-none focus:border-[#dfba69] font-serif resize-none"
           />
           <div className="flex items-center gap-2">
             <button
@@ -361,7 +370,7 @@ const NestedCommentItem: React.FC<NestedCommentItemProps> = ({
       )}
 
       {comment.replies && comment.replies.length > 0 && (
-        <div className="relative mt-4 pl-4 sm:pl-5 ml-3.5 border-l border-stone-500/25 hover:border-[#dfba69]/50 transition-colors space-y-5">
+        <div className="relative mt-4 pl-4 sm:pl-5 ml-3.5 border-l border-stone-500/25 hover:border-[#dfba69]/50 transition-colors space-y-4">
           {comment.replies.map((child) => (
             <NestedCommentItem
               key={child.id}
@@ -485,6 +494,17 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
         : old
     );
   };
+
+  const prefetchThread = React.useCallback(
+    (threadId: string) => {
+      void queryClient.prefetchQuery({
+        queryKey: ['discussion-thread', threadId],
+        queryFn: () => loadThreadRepliesWithAuthors(threadId),
+        staleTime: 30_000,
+      });
+    },
+    [queryClient]
+  );
 
   const { data: threadData = [], isPending: isThreadPending } = useQuery({
     queryKey: ['discussion-thread', activeThreadId],
@@ -943,8 +963,8 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-10 lg:gap-12 animate-pulse">
             <div className="space-y-5">
               <div className="h-4 w-32 rounded bg-theme-subtle" />
-              <div className="h-48 rounded-2xl bg-theme-surface border border-stone-500/20" />
-              <div className="h-24 rounded-xl bg-theme-subtle/50" />
+              <div className="h-48 rounded-2xl bg-theme-surface border border-[#c8a256]/20" />
+              <div className="h-24 rounded-2xl bg-theme-surface border border-[#c8a256]/15" />
             </div>
             <div className="space-y-4 lg:border-l lg:border-stone-500/20 lg:pl-8">
               <div className="h-4 w-32 rounded bg-theme-subtle" />
@@ -1186,8 +1206,8 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
               </article>
 
               {/* Discussion Stream */}
-              <section className="flex flex-col gap-5 pt-1">
-                <div className="flex items-center justify-between pb-2.5 border-b border-stone-500/20">
+              <section className="flex flex-col gap-4 pt-1">
+                <div className="flex items-center justify-between pb-1">
                   <h2 className="font-serif font-bold text-xl sm:text-[22px] text-theme-main flex items-baseline gap-2.5">
                     <span>{isAmharic ? 'ውይይት' : 'Discussion'}</span>
                     <span className="text-sm font-sans font-normal text-theme-muted">
@@ -1200,10 +1220,10 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       <button
                         type="button"
                         onClick={() => setThreadSort('top')}
-                        className={`px-2.5 py-1 rounded-full transition-colors cursor-pointer ${
+                        className={`px-3 py-1 rounded-full border transition-colors cursor-pointer ${
                           threadSort === 'top'
-                            ? 'bg-theme-subtle text-theme-main font-medium'
-                            : 'text-theme-muted hover:text-theme-main'
+                            ? 'bg-[#362c1b] text-[#dfba69] border-[#c8a256]/40 font-medium'
+                            : 'border-transparent text-theme-muted hover:text-theme-main'
                         }`}
                       >
                         {isAmharic ? 'ተወዳጅ' : 'Top'}
@@ -1211,10 +1231,10 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       <button
                         type="button"
                         onClick={() => setThreadSort('newest')}
-                        className={`px-2.5 py-1 rounded-full transition-colors cursor-pointer ${
+                        className={`px-3 py-1 rounded-full border transition-colors cursor-pointer ${
                           threadSort === 'newest'
-                            ? 'bg-theme-subtle text-theme-main font-medium'
-                            : 'text-theme-muted hover:text-theme-main'
+                            ? 'bg-[#362c1b] text-[#dfba69] border-[#c8a256]/40 font-medium'
+                            : 'border-transparent text-theme-muted hover:text-theme-main'
                         }`}
                       >
                         {isAmharic ? 'አዲስ' : 'Newest'}
@@ -1223,7 +1243,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                   )}
                 </div>
 
-                {/* Inline Reflection Composer (Opens cleanly at top of Discussion stream) */}
+                {/* Inline Reflection Composer */}
                 {composerOpen && (
                   <form
                     onSubmit={handleSubmitThreadReply}
@@ -1284,32 +1304,31 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 )}
 
                 {isThreadPending && threadReplies.length === 0 ? (
-                  <div className="space-y-4 animate-pulse pt-2">
-                    <div className="h-16 rounded-xl bg-theme-subtle/60" />
-                    <div className="h-16 rounded-xl bg-theme-subtle/60" />
+                  <div className="space-y-4 animate-pulse pt-1">
+                    <div className="h-24 rounded-2xl bg-theme-surface border border-[#c8a256]/15" />
+                    <div className="h-24 rounded-2xl bg-theme-surface border border-[#c8a256]/15" />
                   </div>
                 ) : threadReplies.length > 0 ? (
-                  <div className="divide-y divide-stone-500/20">
-                    {threadReplies.map((reply, index) => (
-                      <div key={reply.id} className={index > 0 ? 'pt-6 mt-6' : ''}>
-                        <NestedCommentItem
-                          comment={reply}
-                          postAuthorName={activeQuestion.author}
-                          depth={0}
-                          likedReplies={likedReplies}
-                          currentUser={currentUser}
-                          onToggleLike={handleToggleReplyLike}
-                          onEditReply={handleEditNestedReply}
-                          onDeleteReply={handleDeleteNestedReply}
-                          inlineReplyingId={inlineReplyingId}
-                          onSetInlineReplyingId={setInlineReplyingId}
-                          onSubmitReply={handleDirectNestedReply}
-                        />
-                      </div>
+                  <div className="flex flex-col gap-4">
+                    {threadReplies.map((reply) => (
+                      <NestedCommentItem
+                        key={reply.id}
+                        comment={reply}
+                        postAuthorName={activeQuestion.author}
+                        depth={0}
+                        likedReplies={likedReplies}
+                        currentUser={currentUser}
+                        onToggleLike={handleToggleReplyLike}
+                        onEditReply={handleEditNestedReply}
+                        onDeleteReply={handleDeleteNestedReply}
+                        inlineReplyingId={inlineReplyingId}
+                        onSetInlineReplyingId={setInlineReplyingId}
+                        onSubmitReply={handleDirectNestedReply}
+                      />
                     ))}
                   </div>
                 ) : (
-                  <div className="py-10 text-center rounded-2xl bg-theme-surface/50 border border-stone-500/20">
+                  <div className="py-10 text-center rounded-2xl bg-theme-surface border border-[#c8a256]/15">
                     <span className="material-symbols-outlined text-3xl text-theme-muted/50 mb-2">
                       forum
                     </span>
@@ -1364,6 +1383,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                       <button
                         key={related.id}
                         type="button"
+                        onMouseEnter={() => prefetchThread(related.id)}
                         onClick={() => handleOpenThread(related.id)}
                         className={`w-full text-left group cursor-pointer block ${
                           idx > 0 ? 'pt-3.5' : ''
@@ -1496,6 +1516,7 @@ export const DiscussionsView: React.FC<DiscussionsViewProps> = ({
                 return (
                   <article
                     key={q.id}
+                    onMouseEnter={() => prefetchThread(q.id)}
                     onClick={() => handleOpenThread(q.id)}
                     className="bg-theme-surface rounded-xl p-4 sm:p-5 border border-theme shadow-xs hover:border-theme-accent/60 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between gap-3 group"
                   >
