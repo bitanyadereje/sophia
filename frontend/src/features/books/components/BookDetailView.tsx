@@ -5,6 +5,7 @@ import { useLanguage } from '../../../context/LanguageContext';
 import { NotesView } from '../../notes/components/NotesView';
 import { loadNotes } from '../../notes/notes.service';
 import { loadUserLibraryBook, removeBookFromLibrary, updateBookStatus } from '../../library/library.service';
+import { BookCover } from './BookCover';
 
 interface BookDetailViewProps {
   book: Book;
@@ -12,13 +13,21 @@ interface BookDetailViewProps {
   reviews?: Review[];
   currentUser?: UserProfile;
   onAddNote?: (n: Note) => void;
-  onAddReview?: (reviewData: any) => void; 
+  onAddReview?: (reviewData: any) => void;
   onAddQuestion?: (q: Question) => void;
   onAddReply?: (questionId: string, replyText: string) => void;
   onNavigate: (screen: ScreenId) => void;
+  onBack?: () => void;
   onOpenSeminar?: (bookId?: string) => void;
   onShowToast: (msg: string) => void;
 }
+
+const STATUS_OPTIONS: { value: ReadingStatus; en: string; am: string; icon: string }[] = [
+  { value: 'to_be_read', en: 'Want to read', am: 'ማንበብ እፈልጋለሁ', icon: 'bookmark' },
+  { value: 'reading', en: 'Reading', am: 'በማንበብ ላይ', icon: 'auto_stories' },
+  { value: 'finished', en: 'Finished', am: 'ተጠናቋል', icon: 'check_circle' },
+  { value: 'dnf', en: 'Did not finish', am: 'አልጨረስኩም', icon: 'block' },
+];
 
 export const BookDetailView: React.FC<BookDetailViewProps> = ({
   book,
@@ -27,6 +36,7 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
   onAddNote,
   onAddReview,
   onNavigate,
+  onBack,
   onOpenSeminar,
   onShowToast
 }) => {
@@ -34,13 +44,12 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
   const queryClient = useQueryClient();
 
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
-  const [isWantModalOpen, setIsWantModalOpen] = useState(false);
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<'status' | null>(null);
 
   const [logPage, setLogPage] = useState<number>(1);
   const [logLocation, setLogLocation] = useState<string>('');
-  const [wantRemarks, setWantRemarks] = useState<string>('');
 
   const [noteText, setNoteText] = useState('');
   const [noteLocation, setNoteLocation] = useState('');
@@ -82,10 +91,36 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
     onError: () => onShowToast('Could not update your library'),
   });
 
-  // Filter reviews for this book by matching book_id
   const bookReviews = useMemo(() => {
     return reviews.filter((r) => r.book_id === book.id);
   }, [reviews, book.id]);
+
+  const currentStatus: ReadingStatus | null = libraryBook ? (libraryBook.status as ReadingStatus) : null;
+  const currentStatusOption = STATUS_OPTIONS.find((s) => s.value === currentStatus);
+  const isBusy = libraryStatusMutation.isPending || saveBookMutation.isPending;
+
+  const changeStatus = (status: ReadingStatus) => {
+    setOpenMenu(null);
+    if (!currentUser?.id) return onShowToast('Sign in to update your library');
+    if (status === currentStatus) return;
+    libraryStatusMutation.mutate({ status });
+  };
+
+  const handleRemoveFromLibrary = () => {
+    setOpenMenu(null);
+    if (!currentUser?.id) return onShowToast('Sign in to update your library');
+    const message = isAmharic
+      ? 'ይህን መጽሐፍ ከቤተ-መጻሕፍትዎ ማስወገድ ይፈልጋሉ? ሂደትዎ ይጠፋል።'
+      : 'Remove this book from your library? Your progress will be lost.';
+    if (!window.confirm(message)) return;
+    saveBookMutation.mutate(false);
+    onShowToast(isAmharic ? 'ከቤተ-መጻሕፍት ተወግዷል' : 'Removed from library');
+  };
+
+  const openReviewModal = () => {
+    setOpenMenu(null);
+    setIsReviewModalOpen(true);
+  };
 
   const handleSaveReadingLog = (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,13 +128,6 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
     if (currentUser?.id) libraryStatusMutation.mutate({ status: 'reading', pagesRead: pageNum });
     else onShowToast('Sign in to update your library');
     setIsLogModalOpen(false);
-  };
-
-  const handleSaveWantToRead = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentUser?.id) return onShowToast('Sign in to update your library');
-    libraryStatusMutation.mutate({ status: 'to_be_read' });
-    setIsWantModalOpen(false);
   };
 
   const handleCreateNote = (e: React.FormEvent) => {
@@ -153,14 +181,63 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
     onShowToast(`Review published for ${book.title}`);
   };
 
-  const handleStartReading = () => {
-    if (!currentUser?.id) return onShowToast('Sign in to update your library');
-    libraryStatusMutation.mutate({ status: 'reading' });
+  const t = {
+    primaryBtn:
+      'h-10 px-4 rounded-lg bg-theme-accent text-white hover:opacity-90 text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer shadow-xs disabled:opacity-60 disabled:cursor-not-allowed',
+    secondaryBtn:
+      'h-10 px-4 rounded-lg bg-theme-surface border border-theme text-theme-main hover:bg-theme-subtle text-xs sm:text-sm font-semibold transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed',
+    menu:
+      'absolute top-full mt-2 z-30 min-w-[210px] bg-theme-surface border border-theme rounded-xl shadow-lg p-1.5 flex flex-col',
+    menuItem:
+      'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs sm:text-sm text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer text-left',
+    icon: 'material-symbols-outlined text-[18px]',
   };
 
-  const handleMarkFinished = () => {
-    if (!currentUser?.id) return onShowToast('Sign in to update your library');
-    libraryStatusMutation.mutate({ status: 'finished' });
+  const renderPrimary = () => {
+    switch (currentStatus) {
+      case 'reading':
+        return (
+          <button type="button" onClick={() => setIsLogModalOpen(true)} disabled={isBusy} className={t.primaryBtn}>
+            <span className={t.icon}>menu_book</span>
+            <span>{isAmharic ? 'ንባብ መዝግብ' : 'Log reading'}</span>
+          </button>
+        );
+      case 'finished':
+        return (
+          <button type="button" onClick={() => changeStatus('reading')} disabled={isBusy} className={t.primaryBtn}>
+            <span className={t.icon}>replay</span>
+            <span>{isAmharic ? 'እንደገና አንብብ' : 'Read again'}</span>
+          </button>
+        );
+      case 'dnf':
+        return (
+          <button type="button" onClick={() => changeStatus('reading')} disabled={isBusy} className={t.primaryBtn}>
+            <span className={t.icon}>play_arrow</span>
+            <span>{isAmharic ? 'ንባብ ቀጥል' : 'Resume reading'}</span>
+          </button>
+        );
+      default:
+        return (
+          <button type="button" onClick={() => changeStatus('reading')} disabled={isBusy} className={t.primaryBtn}>
+            <span className={t.icon}>play_arrow</span>
+            <span>{isAmharic ? 'ንባብ ጀምር' : 'Start reading'}</span>
+          </button>
+        );
+    }
+  };
+
+  const renderSecondary = () => {
+    switch (currentStatus) {
+      case null:
+        return (
+          <button type="button" onClick={() => changeStatus('to_be_read')} disabled={isBusy} className={t.secondaryBtn}>
+            <span className={t.icon}>bookmark_add</span>
+            <span>{isAmharic ? 'ወደ TBR አስቀምጥ' : 'Want to read'}</span>
+          </button>
+        );
+      default:
+        return null;
+    }
   };
 
   return (
@@ -170,7 +247,7 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
         <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2.5 min-w-0">
             <button
-              onClick={() => onNavigate('colloquium')}
+              onClick={() => onBack ? onBack() : onNavigate('colloquium')}
               className="min-w-[34px] min-h-[34px] flex items-center justify-center rounded-full bg-theme-subtle hover:bg-theme-muted text-theme-main transition-colors cursor-pointer"
               aria-label={isAmharic ? 'ተመለስ' : 'Back'}
             >
@@ -219,26 +296,15 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
 
       <div className="max-w-4xl xl:max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 flex flex-col gap-6">
         {/* 1. BOOK OVERVIEW CARD */}
-        <section className="bg-theme-surface rounded-xl border border-theme p-6 sm:p-8 shadow-xs relative overflow-hidden">
+        <section className="bg-theme-surface rounded-xl border border-theme p-6 sm:p-8 shadow-xs relative">
           <div className="flex flex-col sm:flex-row gap-6 sm:gap-7 items-start">
             {/* Cover */}
             <div className="w-24 h-34 sm:w-28 sm:h-40 rounded-lg overflow-hidden flex-shrink-0 bg-theme-subtle border border-theme shadow-md relative mx-auto sm:mx-0">
-              {book.cover_url ? (
-                <img
-                  src={book.cover_url}
-                  alt={book.title}
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-theme-subtle">
-                  <span className="material-symbols-outlined text-3xl">menu_book</span>
-                </div>
-              )}
+              <BookCover book={book} className="h-full w-full rounded-none border-0 shadow-none" />
             </div>
 
             {/* Book metadata */}
-            <div className="flex flex-col flex-1 min-w-0">
+            <div className="flex flex-col flex-1 min-w-0 w-full">
               <div className="flex flex-wrap items-center gap-2 mb-2">
                 <span className="text-[10px] uppercase font-bold tracking-wider text-theme-accent bg-theme-accent-light px-2 py-0.5 rounded border border-theme whitespace-nowrap">
                   {book.language}
@@ -288,50 +354,82 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
               </div>
 
               {/* Action buttons */}
-              <div className="mt-5 pt-4 border-t border-theme flex flex-wrap items-center gap-3">
-                {libraryBook && (
-                  <span className="rounded-full bg-theme-subtle px-3 py-1 text-xs font-medium text-theme-main">
-                    {libraryBook.status === 'to_be_read' ? 'Want to Read' : libraryBook.status === 'finished' ? 'Finished' : libraryBook.status === 'dnf' ? 'Did not finish' : 'Reading'}
-                  </span>
+              <div className="mt-5 pt-4 border-t border-theme">
+                {openMenu && (
+                  <div
+                    className="fixed inset-0 z-20"
+                    onClick={() => setOpenMenu(null)}
+                    aria-hidden="true"
+                  />
                 )}
-                <button
-                  type="button"
-                  onClick={() => setIsWantModalOpen(true)}
-                  disabled={libraryStatusMutation.isPending}
-                  className="h-10 px-4 py-2 rounded-lg bg-theme-surface border-2 border-theme-accent text-theme-accent hover:bg-theme-accent hover:text-white text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer shadow-xs"
-                >
-                  <span className="material-symbols-outlined text-[18px]">playlist_add</span>
-                  <span>{isAmharic ? 'ወደ TBR አስቀምጥ' : 'Save to Want to Read'}</span>
-                </button>
 
-                <button
-                  type="button"
-                  onClick={handleStartReading}
-                  disabled={libraryStatusMutation.isPending}
-                  className="h-10 px-3.5 py-2 rounded-lg bg-theme-surface border border-theme text-theme-main hover:bg-theme-subtle text-xs sm:text-sm font-serif font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-                >
-                  <span className="material-symbols-outlined text-[17px] text-theme-accent">play_arrow</span>
-                  <span>{isAmharic ? 'ንባብ ጀምር' : 'Start Reading'}</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Status dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setOpenMenu(openMenu === 'status' ? null : 'status')}
+                      aria-haspopup="menu"
+                      aria-expanded={openMenu === 'status'}
+                      className={`h-10 pl-3.5 pr-2.5 rounded-lg border text-xs sm:text-sm font-semibold flex items-center gap-2 cursor-pointer transition-colors relative z-30 ${
+                        currentStatus
+                          ? 'bg-theme-subtle text-theme-main border-theme hover:bg-theme-muted'
+                          : 'bg-theme-subtle text-theme-muted border-theme hover:text-theme-main'
+                      }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${currentStatus ? 'bg-theme-accent' : 'bg-theme-muted'}`} aria-hidden="true" />
+                      <span>
+                        {currentStatusOption
+                          ? isAmharic ? currentStatusOption.am : currentStatusOption.en
+                          : isAmharic ? 'በቤተ-መጻሕፍት የለም' : 'Not in library'}
+                      </span>
+                      <span className="material-symbols-outlined text-[18px]">expand_more</span>
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={() => setIsLogModalOpen(true)}
-                  className="h-10 px-4 py-2 rounded-lg bg-stone-800 dark:bg-stone-700 text-stone-100 hover:bg-stone-700 dark:hover:bg-stone-600 text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer shadow-xs"
-                >
-                  <span className="material-symbols-outlined text-[18px]">menu_book</span>
-                  <span>{isAmharic ? 'ንባብ መዝግብ' : 'Log Reading'}</span>
-                </button>
+                    {openMenu === 'status' && (
+                      <div role="menu" className={`${t.menu} left-0`}>
+                        {STATUS_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={opt.value === currentStatus}
+                            onClick={() => changeStatus(opt.value)}
+                            className={t.menuItem}
+                          >
+                            <span className={`${t.icon} text-theme-muted`}>{opt.icon}</span>
+                            <span className="flex-1">{isAmharic ? opt.am : opt.en}</span>
+                            {opt.value === currentStatus && (
+                              <span className="material-symbols-outlined text-[18px] text-theme-accent">check</span>
+                            )}
+                          </button>
+                        ))}
+                        {isBookSaved && (
+                          <>
+                            <div className="my-1.5 border-t border-theme" role="separator" />
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={handleRemoveFromLibrary}
+                              className={`${t.menuItem} text-red-500 hover:bg-red-500/10`}
+                            >
+                              <span className={t.icon}>delete</span>
+                              <span>{isAmharic ? 'ከቤተ-መጻሕፍት አስወግድ' : 'Remove from library'}</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
-                <button
-                  type="button"
-                  onClick={handleMarkFinished}
-                  disabled={libraryStatusMutation.isPending}
-                  className="h-10 px-3.5 py-2 rounded-lg bg-theme-surface border border-theme text-theme-main hover:bg-theme-subtle text-xs sm:text-sm font-serif font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-                >
-                  <span className="material-symbols-outlined text-[17px] text-theme-accent">check_circle</span>
-                  <span>{isAmharic ? 'እንደተጠናቀቀ ምልክት አድርግ' : 'Mark as Finished'}</span>
-                </button>
+                  {renderPrimary()}
+                  {renderSecondary()}
+
+                  <button type="button" onClick={openReviewModal} className={t.secondaryBtn}>
+                    <span className={t.icon}>rate_review</span>
+                    <span>{isAmharic ? 'መጽሐፍ ዳሰሳ ጻፍ' : 'Write a review'}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -391,78 +489,6 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
 
         {/* 3. NOTES */}
         <NotesView userId={currentUser?.id} books={[book]} onShowToast={onShowToast} initialBookId={book.id} bookFilterId={book.id} compact />
-        {false && <section className="bg-theme-surface rounded-xl border border-theme p-5 sm:p-6 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-theme">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h2 className="font-serif text-lg font-bold text-theme-main">
-                  {isAmharic ? `የ${book.title} ማስታወሻዎች` : `Notes on ${book.title}`}
-                </h2>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-theme-subtle border border-theme text-theme-accent">
-                  {bookNotes.length}
-                </span>
-              </div>
-              <p className="text-xs text-theme-muted mt-0.5 font-serif">
-                {isAmharic
-                  ? 'የግል ማስታወሻዎች፣ የምዕራፍ ጥቅሶች እና የማሰላሰያ ሃሳቦች'
-                  : 'Personal reading notes, chapter citations, and reflections'}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setIsNoteModalOpen(true)}
-              className="h-9 px-3.5 rounded-lg bg-theme-surface border-2 border-theme-accent text-theme-accent hover:bg-theme-accent hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs self-start sm:self-auto"
-            >
-              <span className="material-symbols-outlined text-[16px]">edit_note</span>
-              <span>{isAmharic ? 'ማስታወሻ ጨምር' : 'Add Note'}</span>
-            </button>
-          </div>
-
-          {bookNotes.length === 0 ? (
-            <div className="text-center py-10 px-4 bg-theme-subtle/50 rounded-xl border border-theme/60">
-              <span className="material-symbols-outlined text-4xl text-theme-subtle mb-2">edit_note</span>
-              <p className="font-serif font-bold text-theme-main text-sm">
-                {isAmharic ? 'ለዚህ ጥራዝ የተመዘገበ ማስታወሻ የለም' : 'No notes recorded for this volume yet'}
-              </p>
-              <button
-                type="button"
-                onClick={() => setIsNoteModalOpen(true)}
-                className="mt-3.5 px-3.5 py-1.5 rounded-lg bg-theme-accent text-white text-xs font-semibold hover:opacity-90 transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
-              >
-                <span className="material-symbols-outlined text-[15px]">add</span>
-                <span>{isAmharic ? 'የመጀመሪያውን ማስታወሻ ጨምር' : 'Add First Note'}</span>
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-3">
-              {bookNotes.map((note) => {
-                const noteDate = new Date(note.created_at).toLocaleDateString(
-                  isAmharic ? 'am-ET' : 'en',
-                  { year: 'numeric', month: 'short', day: 'numeric' }
-                );
-
-                return (
-                  <article
-                    key={note.id}
-                    className="p-4 rounded-xl bg-theme-subtle/40 border border-theme space-y-2 hover:border-theme-accent/40 transition-colors"
-                  >
-                    <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
-                      <span className="font-semibold text-theme-main font-serif">
-                        {note.title || (isAmharic ? 'ማስታወሻ' : 'Note')}
-                      </span>
-                      <span className="text-theme-muted text-[11px] font-sans">{noteDate}</span>
-                    </div>
-
-                    <p className="font-serif text-xs sm:text-sm text-theme-body leading-relaxed pl-2 border-l-2 border-theme-accent/50 italic">
-                      {note.content}
-                    </p>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>}
 
         {/* 4. REVIEWS */}
         <section className="bg-theme-surface rounded-xl border border-theme p-5 sm:p-6 shadow-xs space-y-4">
@@ -646,78 +672,6 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
         </div>
       )}
 
-      {/* MODAL B: Want to Read */}
-      {isWantModalOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-          onClick={() => setIsWantModalOpen(false)}
-        >
-          <div
-            className="bg-theme-surface rounded-xl border border-theme max-w-md w-full p-5 sm:p-6 shadow-xl flex flex-col gap-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-theme">
-              <div>
-                <span className="text-[10px] uppercase tracking-wider font-bold text-theme-accent block">
-                  {isAmharic ? 'የቤተ-መጻሕፍት መደርደሪያ' : 'Library Shelf'}
-                </span>
-                <h3 className="font-serif text-base sm:text-lg font-bold text-theme-main">
-                  {isAmharic ? 'ወደ TBR ዝርዝር አስቀምጥ' : 'Save to Want to Read'}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsWantModalOpen(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                aria-label="Close dialog"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveWantToRead} className="flex flex-col gap-3.5 text-xs">
-              <p className="text-theme-muted font-serif leading-relaxed">
-                {isAmharic
-                  ? `«${book.title}»ን ወደ ንባብ ዕቅድዎ ያክሉ።`
-                  : `Add "${book.title}" to your personal library shelf.`}
-              </p>
-
-              <div className="flex flex-col gap-1">
-                <label className="font-semibold text-theme-main font-serif">
-                  {isAmharic ? 'ማስታወሻ (አማራጭ)' : 'Reading Notes (Optional)'}
-                </label>
-                <textarea
-                  rows={4}
-                  placeholder={isAmharic ? 'ለምሳሌ፡ ለሥላሴ ሴሚናር የተጠቆመ...' : 'e.g. Recommended for the seminar...'}
-                  value={wantRemarks}
-                  onChange={(e) => setWantRemarks(e.target.value)}
-                  className="bg-theme-subtle border border-theme rounded-lg p-3 text-theme-main placeholder:text-theme-subtle focus:outline-hidden focus:border-theme-accent resize-none text-xs font-serif"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-theme mt-1">
-                <button
-                  type="button"
-                  onClick={() => setIsWantModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-theme text-theme-muted hover:text-theme-main hover:bg-theme-subtle transition-colors cursor-pointer"
-                >
-                  {isAmharic ? 'ሰርዝ' : 'Cancel'}
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-theme-accent text-white font-semibold hover:opacity-90 transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
-                >
-                  <span className="material-symbols-outlined text-[16px]">bookmark_add</span>
-                  <span>{isAmharic ? 'ወደ ቤተ-መጻሕፍት አስቀምጥ' : 'Save to Library'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* MODAL C: Add Note */}
       {isNoteModalOpen && (
         <div
@@ -831,7 +785,6 @@ export const BookDetailView: React.FC<BookDetailViewProps> = ({
             </div>
 
             <form onSubmit={handleCreateReview} className="flex flex-col gap-3.5 text-xs">
-              {/* Rating selection */}
               <div className="flex flex-col gap-1">
                 <label className="font-semibold text-theme-main font-serif">
                   {isAmharic ? 'የእርስዎ ደረጃ' : 'Your Rating'}
