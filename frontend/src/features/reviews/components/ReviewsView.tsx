@@ -7,7 +7,7 @@ import { addReviewComment, loadReviewCommentsForReviews } from '../services/revi
 import { loadCurrentUserReviewLikes, toggleReviewLike } from '../services/reviewInteraction.service';
 import { FEED_PAGE_SIZE, loadReviewPage } from '../review.service';
 import { useBookmarks } from '../../saved/useBookmarks';
-import { ReviewCard, StarRating, getBookTradition } from './ReviewCard';
+import { BookCover, ReviewCard, StarRating, getBookTradition } from './ReviewCard';
 
 interface ReviewerProfile {
   name?: string | null;
@@ -26,8 +26,6 @@ export interface Marginalium {
   citation?: string | null;
 }
 
-const TRADITION_TAGS = ['Patristic', 'Orthodox', 'Philosophy', 'Theology', 'Literature'];
-
 interface ReviewDraft {
   id: string;
   bookId: string;
@@ -40,7 +38,6 @@ interface ReviewDraft {
   headline: string;
   quote: string;
   quoteCitation: string;
-  tags: string[];
   content: string;
   updatedAt: string;
 }
@@ -314,7 +311,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   const [newFullReview, setNewFullReview] = useState('');
   const [newHeadline, setNewHeadline] = useState('');
   const [newQuoteCitation, setNewQuoteCitation] = useState('');
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   const { data: marginalia = [] } = useQuery({
     queryKey: ['book-marginalia', authUserId, newBookId],
@@ -346,7 +342,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
               headline: d.headline || '',
               quote: d.quote || '',
               quoteCitation: d.quoteCitation || '',
-              tags: Array.isArray(d.tags) ? d.tags : [],
               content: d.content || '',
               updatedAt: d.updatedAt || new Date().toISOString(),
             }))
@@ -405,7 +400,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
         headline: newHeadline,
         quote: newQuote,
         quoteCitation: newQuoteCitation,
-        tags: selectedTags,
         content: newFullReview,
         updatedAt: nowIso,
       };
@@ -444,7 +438,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     newHeadline,
     newQuote,
     newQuoteCitation,
-    selectedTags,
     newFullReview,
   ]);
 
@@ -585,7 +578,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     setNewFullReview('');
     setNewHeadline('');
     setNewQuoteCitation('');
-    setSelectedTags([]);
     setEditingReview(null);
     setActiveDraftId(null);
     setIsAddingNewBook(false);
@@ -609,7 +601,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     setNewFullReview(draft.content);
     setNewHeadline(draft.headline || '');
     setNewQuoteCitation(draft.quoteCitation || '');
-    setSelectedTags(draft.tags || []);
     setIsAddingNewBook(Boolean(!draft.bookId && (draft.bookTitle || draft.bookAuthor)));
     setLastSavedAt(draft.updatedAt);
     setDraftSaveState('saved');
@@ -778,7 +769,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
       title: newHeadline.trim() || null,
       // Presentation metrics stay derived locally from editor text, never persisted.
       status: requestedStatus ?? editingReview?.status ?? 'published',
-      // TODO: add a `tags` column to reviews, then pass `tags: selectedTags` here.
     };
 
     setIsSubmitting(true);
@@ -981,11 +971,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
           Number(newPageCount) >= 1));
 
     const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
-
-    const toggleTag = (tag: string) =>
-      setSelectedTags((prev) =>
-        prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]
-      );
 
     // Both lists show 2 items until expanded
     const visibleDrafts = showAllDrafts ? drafts : drafts.slice(0, 2);
@@ -1219,17 +1204,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                   <div className="space-y-4">
                     {selectedBookForForm ? (
                       <div className="rounded-xl border border-theme bg-theme-subtle/60 p-4 flex gap-4 items-center">
-                        {selectedBookForForm.cover_url ? (
-                          <img
-                            src={selectedBookForForm.cover_url}
-                            alt={`Cover of ${selectedBookForForm.title}`}
-                            className="h-[60px] w-11 rounded object-cover flex-shrink-0 border border-theme"
-                          />
-                        ) : (
-                          <div className="h-[60px] w-11 rounded-md border border-theme-accent/50 flex items-center justify-center flex-shrink-0 text-theme-accent">
-                            <span className="material-symbols-outlined text-[22px]">menu_book</span>
-                          </div>
-                        )}
+                        <BookCover book={selectedBookForForm} className="h-[60px] w-11 flex-shrink-0" />
 
                         <div className="min-w-0">
                           <p className="font-serif text-[22px] font-bold text-theme-main leading-tight">
@@ -1443,26 +1418,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex flex-wrap gap-2 mt-4">
-                      {TRADITION_TAGS.map((tag) => {
-                        const active = selectedTags.includes(tag);
-                        return (
-                          <button
-                            key={tag}
-                            type="button"
-                            onClick={() => toggleTag(tag)}
-                            aria-pressed={active}
-                            className={`text-xs px-3 py-1 rounded-full border transition-colors cursor-pointer ${
-                              active
-                                ? 'bg-theme-accent/15 text-theme-accent border-theme-accent/50 font-semibold'
-                                : 'bg-theme-subtle/60 border-theme text-theme-muted hover:text-theme-main hover:border-theme-accent/40'
-                            }`}
-                          >
-                            {tag}
-                          </button>
-                        );
-                      })}
-                    </div>
                   </div>
                 </div>
 
@@ -1620,18 +1575,6 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                         {newRating.toFixed(1)} / 5
                       </span>
                     </div>
-                    {selectedTags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pt-1">
-                        {selectedTags.map((tag) => (
-                          <span
-                            key={tag}
-                            className="text-[10px] uppercase tracking-wider text-theme-muted bg-theme-subtle border border-theme/60 px-2 py-0.5 rounded-full"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
 

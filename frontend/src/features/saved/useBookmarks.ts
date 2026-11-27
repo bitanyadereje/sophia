@@ -28,6 +28,9 @@ export const useBookmarks = (userId: string | null | undefined, kind: SavedKind,
     onSettled: () => Promise.all([
       queryClient.invalidateQueries({ queryKey }),
       queryClient.invalidateQueries({ queryKey: ['bookmarks', 'items', userId] }),
+      ...(kind === 'path'
+        ? [queryClient.invalidateQueries({ queryKey: ['active-reading-path', userId] })]
+        : []),
     ]),
   });
 
