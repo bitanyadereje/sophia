@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Book, ReadingStatus } from '../../../types';
+import { BookCover } from '../../books/components/BookCover';
 import { useLanguage } from '../../../context/LanguageContext';
 import { loadUserLibrary, removeBookFromLibrary, updateBookStatus } from '../library.service';
 
@@ -286,24 +287,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                 className="relative bg-theme-surface rounded-xl border border-theme-subtle p-4 hover:border-theme transition-all cursor-pointer flex gap-3.5 group"
               >
                 {/* COVER */}
-                <div className="w-[68px] h-[100px] rounded-md overflow-hidden bg-theme-subtle border border-theme-subtle shrink-0">
-                  {book.cover_url ? (
-                    <img
-                      src={book.cover_url}
-                      alt={book.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex flex-col justify-between p-2 bg-theme-subtle text-left border-l-2 border-theme-accent/50">
-                      <span className="font-serif text-[11px] font-semibold leading-tight text-theme-main line-clamp-3">
-                        {book.title}
-                      </span>
-                      <span className="text-[9px] uppercase tracking-wider text-theme-muted truncate">
-                        {book.language}
-                      </span>
-                    </div>
-                  )}
-                </div>
+                <BookCover book={book} className="h-[100px] w-[68px] shrink-0" imageClassName="group-hover:scale-105 transition-transform duration-300" />
 
                 {/* DETAILS */}
                 <div className="flex-1 min-w-0 flex flex-col justify-between">

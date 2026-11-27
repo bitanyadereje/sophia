@@ -17,6 +17,8 @@ import { NotesView } from './features/notes/components/NotesView';
 import { loadNotes } from './features/notes/notes.service';
 import { supabase } from './lib/supabase';
 import { AdminDashboard } from './features/admin';
+import { loadUserLibrary } from './features/library/library.service';
+import { loadActiveUserPath } from './features/reading-paths/path.service';
 
 // ============================================================
 // Empty defaults
@@ -59,7 +61,7 @@ export const App: React.FC = () => {
   const [targetQuestionId, setTargetQuestionId] = useState<string | null>(null);
   const [targetReviewId, setTargetReviewId] = useState<string | null>(null);
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
-  const [previousScreen, setPreviousScreen] = useState<ScreenId>('colloquium');
+  const [backStack, setBackStack] = useState<ScreenId[]>([]);
 
   // --- SERVER DATA VIA TANSTACK QUERY (Deduplicated & Cached) ---
   const { data: books = [] } = useQuery({
@@ -70,6 +72,18 @@ export const App: React.FC = () => {
   const { data: loadedProfile } = useQuery({
     queryKey: ['profile', authUserId],
     queryFn: () => loadProfile(authUserId!),
+    enabled: Boolean(authUserId),
+  });
+
+  const { data: homeLibrary = [] } = useQuery({
+    queryKey: ['library', authUserId],
+    queryFn: () => loadUserLibrary(authUserId!),
+    enabled: Boolean(authUserId),
+  });
+
+  const { data: activePath = null } = useQuery({
+    queryKey: ['active-reading-path', authUserId, homeLibrary],
+    queryFn: () => loadActiveUserPath(authUserId!, homeLibrary),
     enabled: Boolean(authUserId),
   });
 
@@ -164,7 +178,19 @@ export const App: React.FC = () => {
   }, [toastMessage]);
 
   // --- NAVIGATION HANDLERS ---
+  const returnToPreviousScreen = () => {
+    const destination = backStack[backStack.length - 1] ?? 'home';
+    setBackStack((stack) => stack.slice(0, -1));
+    setCurrentScreen(destination);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const rememberCurrentScreen = () => setBackStack((stack) => [...stack, currentScreen]);
+
   const handleNavigate = (screen: ScreenId) => {
+    if (screen === 'book-detail' || screen === 'review-detail' || screen === 'path-detail' || screen === 'seminar') {
+      rememberCurrentScreen();
+    }
     if (screen === 'discussions') setTargetQuestionId(null);
     if (screen === 'reviews') {
       setTargetReviewId(null);
@@ -183,25 +209,28 @@ export const App: React.FC = () => {
   const handleNavigateToReview = (reviewId: string) => {
     setSelectedReviewId(reviewId);
     setTargetReviewId(reviewId);
+    rememberCurrentScreen();
     setCurrentScreen('review-detail');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSelectReview = (reviewId: string) => {
     setSelectedReviewId(reviewId);
+    rememberCurrentScreen();
     setCurrentScreen('review-detail');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSelectBook = (bookId: string) => {
     setSelectedBookId(bookId);
+    rememberCurrentScreen();
     setCurrentScreen('book-detail');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenSeminar = (targetBookId?: string) => {
     if (targetBookId) setSelectedBookId(targetBookId);
-    setPreviousScreen(currentScreen === 'seminar' ? 'colloquium' : currentScreen);
+    if (currentScreen !== 'seminar') rememberCurrentScreen();
     setCurrentScreen('seminar');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -379,6 +408,7 @@ export const App: React.FC = () => {
               onShowToast={showToast}
               onNavigateToDiscussion={handleNavigateToDiscussion}
               onNavigateToReview={handleNavigateToReview}
+              activePath={activePath}
             />
           )
         )}
@@ -422,6 +452,7 @@ export const App: React.FC = () => {
             onAddReview={handleAddReview}
             onAddReply={() => {}}
             onNavigate={handleNavigate}
+            onBack={returnToPreviousScreen}
             onOpenSeminar={handleOpenSeminar}
             onShowToast={showToast}
           />
@@ -432,7 +463,7 @@ export const App: React.FC = () => {
             book={books.find((b) => b.id === selectedBookId) || books[0]}
             comments={colloquiumComments}
             onAddComment={(c) => setColloquiumComments(prev => [...prev, c])}
-            onBack={() => { setCurrentScreen(previousScreen === 'seminar' ? 'colloquium' : previousScreen); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onBack={returnToPreviousScreen}
             onNavigate={handleNavigate}
             onShowToast={showToast}
           />
@@ -460,6 +491,7 @@ export const App: React.FC = () => {
             selectedPathId={selectedPathId}
             onSelectPath={setSelectedPathId}
             onNavigate={handleNavigate}
+            onBack={returnToPreviousScreen}
             onShowToast={showToast}
             userId={authUserId || ''}
             canCreatePaths={canCreateReadingPaths || false}
@@ -512,8 +544,7 @@ export const App: React.FC = () => {
             book={books.find((b) => b.id === selectedReview.book_id)}
             onBack={() => {
               setSelectedReviewId(null);
-              setCurrentScreen('reviews');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              returnToPreviousScreen();
             }}
             onNavigate={handleNavigate}
             onSelectBook={handleSelectBook}
