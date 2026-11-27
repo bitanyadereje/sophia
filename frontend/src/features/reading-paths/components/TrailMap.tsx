@@ -9,6 +9,7 @@ export interface TrailStation {
   position: number;
   title: string;
   author?: string;
+  cover_url?: string | null;
   pages: number;
   note?: string;
   status: StationStatus;
@@ -84,6 +85,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
   const readingIndex = stations.findIndex((s) => s.status === 'reading');
   const todoIndex = stations.findIndex((s) => s.status === 'todo');
   const currentIndex = readingIndex >= 0 ? readingIndex : todoIndex >= 0 ? todoIndex : count - 1;
+  const activeGold = 'var(--gold, #D4A94E)';
 
   const selectedIndex = stations.findIndex((s) => s.id === selectedId);
   const selected = selectedIndex >= 0 ? stations[selectedIndex] : null;
@@ -133,6 +135,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
             {stations.map((station, i) => {
               const { x, y } = points[i];
               const isSelected = station.id === selectedId;
+              const isCurrentStation = i === currentIndex && station.status !== 'finished';
               const labelY = compact
                 ? y >= midY
                   ? y - 34
@@ -149,7 +152,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
                       cy={y}
                       r={compact ? '21' : '24'}
                       fill="none"
-                      stroke="var(--accent)"
+                      stroke={isCurrentStation ? activeGold : 'var(--accent)'}
                       strokeWidth="1.5"
                       strokeDasharray="3 3"
                     />
@@ -166,24 +169,24 @@ export const TrailMap: React.FC<TrailMapProps> = ({
                       />
                     </>
                   )}
-                  {station.status === 'reading' && (
+                  {isCurrentStation && (
                     <>
                       <circle
                         cx={x}
                         cy={y}
                         r={compact ? '15' : '17'}
                         fill="var(--bg-surface)"
-                        stroke="var(--accent)"
+                        stroke={activeGold}
                         strokeWidth="3"
                       />
-                      <circle cx={x} cy={y} r={compact ? '5.5' : '6'} fill="var(--accent)" />
+                      <circle cx={x} cy={y} r={compact ? '5.5' : '6'} fill={activeGold} />
                       <circle
                         cx={x}
                         cy={y}
                         r={compact ? '18' : '20'}
                         fill="none"
-                        stroke="var(--accent)"
-                        strokeOpacity=".5"
+                        stroke={activeGold}
+                        strokeOpacity=".55"
                         className="motion-reduce:hidden"
                       >
                         <animate
@@ -192,11 +195,11 @@ export const TrailMap: React.FC<TrailMapProps> = ({
                           dur="2.4s"
                           repeatCount="indefinite"
                         />
-                        <animate attributeName="stroke-opacity" values=".5;0;.5" dur="2.4s" repeatCount="indefinite" />
+                        <animate attributeName="stroke-opacity" values=".55;0;.55" dur="2.4s" repeatCount="indefinite" />
                       </circle>
                     </>
                   )}
-                  {station.status === 'todo' && (
+                  {station.status === 'todo' && !isCurrentStation && (
                     <circle
                       cx={x}
                       cy={y}
@@ -213,7 +216,7 @@ export const TrailMap: React.FC<TrailMapProps> = ({
                     textAnchor="middle"
                     fontSize={compact ? '16' : '18'}
                     fontWeight="600"
-                    fill={isSelected ? 'var(--accent)' : 'var(--text-main)'}
+                    fill={isCurrentStation ? activeGold : isSelected ? 'var(--accent)' : 'var(--text-main)'}
                     style={{ fontFamily: 'var(--font-serif)' }}
                   >
                     {shorten(station.title, compact ? 18 : 22)}
