@@ -116,8 +116,7 @@ export const loadDiscussionTopics = async (postIds: string[]): Promise<Record<st
   const topics: Record<string, string> = {};
   for (const row of data ?? []) {
     const tag = row.tag as { name?: string; slug?: string } | null;
-    const topic = Object.keys(topicTagSlugs).find((name) => topicTagSlugs[name] === tag?.slug);
-    if (topic) topics[row.post_id] = topic;
+    if (tag?.name) topics[row.post_id] = tag.name;
   }
   return topics;
 };
@@ -128,6 +127,8 @@ const saveDiscussionTopic = async (postId: string, topic: string): Promise<void>
   const { data: tag, error: tagError } = await supabase.from('tags').select('id').eq('slug', slug).maybeSingle();
   if (tagError) throw tagError;
   if (!tag) throw new Error(`Discussion topic tag "${topic}" is missing from the database.`);
+  // Validate the selected tag before replacing the current relation so a failed
+  // lookup never leaves an edited discussion without its prior topic.
   const { error: clearError } = await supabase.from('discussion_post_tags').delete().eq('post_id', postId);
   if (clearError) throw clearError;
   const { error: insertError } = await supabase.from('discussion_post_tags').insert({ post_id: postId, tag_id: tag.id });
